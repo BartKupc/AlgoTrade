@@ -5,6 +5,7 @@ import pandas as pd
 import logging
 from datetime import datetime
 from pathlib import Path
+import requests
 
 # Add this to properly import from parent directory
 import sys
@@ -25,6 +26,27 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+
+# Telegram Bot Setup
+TELEGRAM_BOT_TOKEN = "7292159640:AAEZnq6jOkze_PBBWMiBHnyCW_dtiHVv6xo"
+TELEGRAM_CHAT_ID = "7393611077"  # Make sure this is the correct chat ID
+
+def send_telegram_message(message):
+    """Sends a message to the Telegram bot"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            logging.info("Telegram alert sent successfully.")
+        else:
+            # Remove emoji from logging to avoid encoding issues
+            logging.warning(f"Telegram message failed: {response.text}")
+    except Exception as e:
+        # Remove emoji from logging to avoid encoding issues
+        logging.error(f"Telegram API error: {str(e)}")
+
 
 # Configuration and setup
 params = {
@@ -253,8 +275,10 @@ def trade_logic():
     # Long entry conditions
     if (macd > macd_signal and prev_macd <= prev_signal and
         check_trend(data, 'long') and
-        check_volatility(data)):
+        check_volatility(data)
+    ):
         logging.info("Long entry conditions met!")
+        
         if not has_position or (has_position and position[0]['side'] == 'short'):
             if has_position:
                 bitget.flash_close_position(params['symbol'])
@@ -290,8 +314,10 @@ def trade_logic():
     elif (macd < macd_signal and prev_macd >= prev_signal and
           check_trend(data, 'short') and
           check_volume(data, 'short') and
-          check_volatility(data)):
+          check_volatility(data)
+    ):
         logging.info("Short entry conditions met!")
+        
         if not has_position or (has_position and position[0]['side'] == 'long'):
             if has_position:
                 bitget.flash_close_position(params['symbol'])
@@ -325,6 +351,90 @@ def trade_logic():
             
     else:
         logging.info("No entry conditions met")
+    
+    # Get position details if any exists
+    position_info = "No Position"
+    position_entry = "N/A"
+    position_pnl = "N/A"
+    if has_position:
+        try:
+            pos = position[0]
+            side = pos['side']
+            entry_price = float(pos['info']['openPriceAvg'])
+            size = pos['contracts']
+            
+            # Try different possible field names for unrealized PnL
+            try:
+                unrealized_pnl = float(pos['info'].get('unrealisedPnl') or 
+                                     pos['info'].get('unrealizedPnl') or 
+                                     pos.get('unrealizedPnl') or 
+                                     0.0)
+            except (KeyError, ValueError):
+                unrealized_pnl = 0.0
+                logging.warning("Could not get unrealized PnL value")
+            
+            position_info = f"{side.upper()} {size} contracts"
+            position_entry = f"${entry_price:.2f}"
+            position_pnl = f"${unrealized_pnl:.2f}"
+        except Exception as e:
+            logging.error(f"Error processing position info: {str(e)}")
+            position_info = "Error getting position details"
+
+    # Get current market price
+    try:
+        ticker = bitget.fetch_ticker(params['symbol'])
+        current_price = ticker['last']
+    except Exception as e:
+        logging.error(f"Error fetching current price: {str(e)}")
+        current_price = close  # fallback to close price if fetch fails
+
+    # Update message format with both close and current price
+    message = (
+        f"🤖 Momentum Bot Status Update\n\n"
+        f"💰 Position Status:\n"
+        f"Current: {position_info}\n"
+        f"Entry Price: {position_entry}\n"
+        f"Unrealized PnL: {position_pnl}\n\n"
+        
+        f"📊 Price Action:\n"
+        f"Current Market Price: ${current_price:.2f}\n"
+        f"Last Candle Close: ${close:.2f}\n"
+        f"24h Change: {((close - data.iloc[-24]['close'])/data.iloc[-24]['close']*100):.2f}%\n\n"
+        
+        f"📈 MACD Indicators:\n"
+        f"MACD: {macd:.2f} | Signal: {macd_signal:.2f}\n"
+        f"Prev MACD: {prev_macd:.2f} | Prev Signal: {prev_signal:.2f}\n"
+        f"MACD < Signal: {macd < macd_signal} "
+        f"({'Bearish/Short Signal' if macd < macd_signal else 'Bullish/Long Signal'})\n\n"
+        
+        f"🎯 Trading Conditions:\n"
+        f"ADX: {adx:.2f} (>{params['adx_threshold']}: {adx > params['adx_threshold']})\n"
+        f"Long Trend: {is_long_trend}\n"
+        f"Short Trend: {is_short_trend}\n"
+        f"Volatility OK: {is_volatile}\n"
+        f"Volume OK: {is_volume_ok}\n\n"
+        
+        f"🔄 Entry Conditions:\n"
+        f"Long Ready: {macd > macd_signal and prev_macd <= prev_signal and is_long_trend and is_volatile}\n"
+        f"Short Ready: {macd < macd_signal and prev_macd >= prev_signal and is_short_trend and is_volume_ok and is_volatile}\n"
+    )
+
+    # Check if there are any pending orders
+    if has_pending_orders:
+        pending_orders_info = "\n🔶 Pending Orders:\n"
+        for order in open_orders:
+            pending_orders_info += f"- {order['side'].upper()} {order['amount']} @ ${float(order['price']):.2f}\n"
+        message += pending_orders_info
+
+    # Check if there are any stop loss/take profit orders
+    trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+    if trigger_orders:
+        tp_sl_info = "\n⚡ Active TP/SL Orders:\n"
+        for order in trigger_orders:
+            tp_sl_info += f"- {order['side'].upper()} {order['amount']} @ ${float(order['triggerPrice']):.2f}\n"
+        message += tp_sl_info
+
+    send_telegram_message(message)
 
 if __name__ == "__main__":
     try:
