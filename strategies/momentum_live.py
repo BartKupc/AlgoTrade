@@ -142,6 +142,23 @@ def calculate_position_size(close_price):
 def trade_logic():
     logging.info("Fetching and processing data...")
     data = fetch_data()
+    
+    # Check for open positions and orders
+    position = bitget.fetch_open_positions(params['symbol'])
+    has_position = len(position) > 0
+    
+    # If no position is open, cancel all trigger orders
+    if not has_position:
+        try:
+            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            if trigger_orders:
+                for order in trigger_orders:
+                    bitget.cancel_trigger_order(order['id'], params['symbol'])
+                    logging.info(f"Cancelled orphaned trigger order {order['id']}")
+        except Exception as e:
+            logging.error(f"Error cancelling trigger orders: {str(e)}")
+    
+    # Continue with rest of trade logic...
     last_row = data.iloc[-1]
     macd, macd_signal, adx, close = last_row[['macd', 'macd_signal', 'adx', 'close']]
     prev_row = data.iloc[-2]
@@ -157,14 +174,6 @@ def trade_logic():
     logging.info(f"Current MACD < Signal: {macd < macd_signal} ({macd:.6f} < {macd_signal:.6f})")
     logging.info(f"Previous MACD >= Signal: {prev_macd >= prev_signal} ({prev_macd:.6f} >= {prev_signal:.6f})")
     
-    # Check for open positions and orders
-    position = bitget.fetch_open_positions(params['symbol'])
-    has_position = len(position) > 0
-    open_orders = bitget.fetch_open_orders(params['symbol'])
-    has_pending_orders = len(open_orders) > 0
-    
-    logging.info(f"Current state - Has position: {has_position}, Has pending orders: {has_pending_orders}")
-
     # Check time-based stop loss for shorts
     if has_position and position[0]['side'] == 'short':
         entry_time = position[0]['timestamp']
@@ -180,30 +189,6 @@ def trade_logic():
             return
 
     # Check pending orders against current conditions
-    if has_pending_orders:
-        is_long_signal = (macd > macd_signal and prev_macd <= prev_signal and 
-                         check_trend(data, 'long') and check_volatility(data))
-        is_short_signal = (macd < macd_signal and prev_macd >= prev_signal and 
-                         check_trend(data, 'short') and check_volume(data, 'short') and 
-                         check_volatility(data))
-        
-        orders_cancelled = False
-        for order in open_orders:
-            if not order.get('info', {}).get('reduceOnly', False):  # Not a SL/TP order
-                order_matches_signal = (
-                    (order['side'] == 'buy' and is_long_signal) or 
-                    (order['side'] == 'sell' and is_short_signal)
-                )
-                
-                if not order_matches_signal:
-                    bitget.cancel_order(order['id'], params['symbol'])
-                    logging.info(f"Cancelled {order['side']} entry order due to changed conditions")
-                    return
-        
-        if not orders_cancelled:
-            return
-
-    # Check and place SL/TP orders if missing
     if has_position:
         pos = position[0]
         trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
@@ -420,7 +405,8 @@ def trade_logic():
     )
 
     # Check if there are any pending orders
-    if has_pending_orders:
+    open_orders = bitget.fetch_open_orders(params['symbol'])
+    if open_orders:
         pending_orders_info = "\n🔶 Pending Orders:\n"
         for order in open_orders:
             pending_orders_info += f"- {order['side'].upper()} {order['amount']} @ ${float(order['price']):.2f}\n"
