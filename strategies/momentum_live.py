@@ -398,8 +398,18 @@ def trade_logic():
         
         return trend
 
+    def get_macd_signal_relationship(macd, signal):
+        """Returns a simple string describing MACD vs Signal relationship"""
+        if macd > signal:
+            return "LONG (MACD above Signal)"
+        else:
+            return "SHORT (MACD below Signal)"
+
     # Update message format
     macd_trend = get_macd_trend_description(macd, macd_signal, prev_macd, prev_signal, prev2_macd, prev2_signal)
+    current_macd_state = get_macd_signal_relationship(macd, macd_signal)
+    prev_macd_state = get_macd_signal_relationship(prev_macd, prev_signal)
+    prev2_macd_state = get_macd_signal_relationship(prev2_macd, prev2_signal)
     
     message = (
         f"🤖 Momentum Bot Status Update\n\n"
@@ -414,19 +424,11 @@ def trade_logic():
         f"24h Change: {((close - data.iloc[-24]['close'])/data.iloc[-24]['close']*100):.2f}%\n\n"
         
         f"📈 MACD Analysis:\n"
-        f"{macd_trend}\n"
-        f"Current Values:\n"
-        f"• MACD: {macd:.4f}\n"
-        f"• Signal: {macd_signal:.4f}\n"
-        f"• Difference: {(macd - macd_signal):.4f}\n\n"
-        f"Previous Values (1 candle ago):\n"
-        f"• MACD: {prev_macd:.4f}\n"
-        f"• Signal: {prev_signal:.4f}\n"
-        f"• Difference: {(prev_macd - prev_signal):.4f}\n\n"
-        f"Previous Values (2 candles ago):\n"
-        f"• MACD: {prev2_macd:.4f}\n"
-        f"• Signal: {prev2_signal:.4f}\n"
-        f"• Difference: {(prev2_macd - prev2_signal):.4f}\n\n"
+        f"{macd_trend}\n\n"
+        f"MACD Signal Status:\n"
+        f"• Current: {current_macd_state}\n"
+        f"• 1 Candle Ago: {prev_macd_state}\n"
+        f"• 2 Candles Ago: {prev2_macd_state}\n\n"
         
         f"🎯 Trading Conditions:\n"
         f"ADX: {adx:.2f} (>{params['adx_threshold']}: {adx > params['adx_threshold']})\n"
