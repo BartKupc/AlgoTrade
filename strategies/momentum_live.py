@@ -164,10 +164,14 @@ def trade_logic():
     prev_row = data.iloc[-2]
     prev_macd = prev_row['macd']
     prev_signal = prev_row['macd_signal']
+    prev2_row = data.iloc[-3]
+    prev2_macd = prev2_row['macd']
+    prev2_signal = prev2_row['macd_signal']
     
-    # Log current indicators and MACD crossover conditions
+    # Update logging to include second previous period
     logging.info(f"Current indicators - MACD: {macd:.6f}, Signal: {macd_signal:.6f}, ADX: {adx:.2f}, Close: {close:.2f}")
     logging.info(f"Previous indicators - MACD: {prev_macd:.6f}, Signal: {prev_signal:.6f}")
+    logging.info(f"Previous2 indicators - MACD: {prev2_macd:.6f}, Signal: {prev2_signal:.6f}")
     
     # Log MACD conditions separately
     logging.info("MACD Conditions Check:")
@@ -257,8 +261,9 @@ def trade_logic():
         if not (prev_macd >= prev_signal):
             logging.info(f"Previous MACD not above Signal: {prev_macd:.6f} < {prev_signal:.6f}")
 
-    # Long entry conditions
-    if (macd > macd_signal and prev_macd <= prev_signal and
+    # Modified Long entry conditions
+    if (macd > macd_signal and 
+        (prev_macd <= prev_signal or prev2_macd <= prev2_signal) and
         check_trend(data, 'long') and
         check_volatility(data)
     ):
@@ -295,8 +300,9 @@ def trade_logic():
                 reduce=True
             )
             
-    # Short entry conditions
-    elif (macd < macd_signal and prev_macd >= prev_signal and
+    # Modified Short entry conditions
+    elif (macd < macd_signal and 
+          (prev_macd >= prev_signal or prev2_macd >= prev2_signal) and
           check_trend(data, 'short') and
           check_volume(data, 'short') and
           check_volatility(data)
@@ -389,6 +395,7 @@ def trade_logic():
         f"📈 MACD Indicators:\n"
         f"MACD: {macd:.2f} | Signal: {macd_signal:.2f}\n"
         f"Prev MACD: {prev_macd:.2f} | Prev Signal: {prev_signal:.2f}\n"
+        f"Prev2 MACD: {prev2_macd:.2f} | Prev2 Signal: {prev2_signal:.2f}\n"
         f"MACD < Signal: {macd < macd_signal} "
         f"({'Bearish/Short Signal' if macd < macd_signal else 'Bullish/Long Signal'})\n\n"
         
