@@ -379,7 +379,28 @@ def trade_logic():
         logging.error(f"Error fetching current price: {str(e)}")
         current_price = close  # fallback to close price if fetch fails
 
-    # Update message format with both close and current price
+    # Get MACD trend description
+    def get_macd_trend_description(macd, macd_signal, prev_macd, prev_signal, prev2_macd, prev2_signal):
+        current_relationship = "MACD > Signal" if macd > macd_signal else "MACD < Signal"
+        prev_relationship = "MACD > Signal" if prev_macd > prev_signal else "MACD < Signal"
+        prev2_relationship = "MACD > Signal" if prev2_macd > prev2_signal else "MACD < Signal"
+        
+        if macd > macd_signal:
+            if prev_macd <= prev_signal or prev2_macd <= prev2_signal:
+                trend = "🚀 Bullish Crossover: MACD crossed above Signal (Strong Buy Signal)"
+            else:
+                trend = "📈 Bullish Trend: MACD continuing above Signal (Upward Momentum)"
+        else:
+            if prev_macd >= prev_signal or prev2_macd >= prev2_signal:
+                trend = "📉 Bearish Crossover: MACD crossed below Signal (Strong Sell Signal)"
+            else:
+                trend = "⬇️ Bearish Trend: MACD continuing below Signal (Downward Momentum)"
+        
+        return trend
+
+    # Update message format
+    macd_trend = get_macd_trend_description(macd, macd_signal, prev_macd, prev_signal, prev2_macd, prev2_signal)
+    
     message = (
         f"🤖 Momentum Bot Status Update\n\n"
         f"💰 Position Status:\n"
@@ -392,12 +413,20 @@ def trade_logic():
         f"Last Candle Close: ${close:.2f}\n"
         f"24h Change: {((close - data.iloc[-24]['close'])/data.iloc[-24]['close']*100):.2f}%\n\n"
         
-        f"📈 MACD Indicators:\n"
-        f"MACD: {macd:.2f} | Signal: {macd_signal:.2f}\n"
-        f"Prev MACD: {prev_macd:.2f} | Prev Signal: {prev_signal:.2f}\n"
-        f"Prev2 MACD: {prev2_macd:.2f} | Prev2 Signal: {prev2_signal:.2f}\n"
-        f"MACD < Signal: {macd < macd_signal} "
-        f"({'Bearish/Short Signal' if macd < macd_signal else 'Bullish/Long Signal'})\n\n"
+        f"📈 MACD Analysis:\n"
+        f"{macd_trend}\n"
+        f"Current Values:\n"
+        f"• MACD: {macd:.4f}\n"
+        f"• Signal: {macd_signal:.4f}\n"
+        f"• Difference: {(macd - macd_signal):.4f}\n\n"
+        f"Previous Values (1 candle ago):\n"
+        f"• MACD: {prev_macd:.4f}\n"
+        f"• Signal: {prev_signal:.4f}\n"
+        f"• Difference: {(prev_macd - prev_signal):.4f}\n\n"
+        f"Previous Values (2 candles ago):\n"
+        f"• MACD: {prev2_macd:.4f}\n"
+        f"• Signal: {prev2_signal:.4f}\n"
+        f"• Difference: {(prev2_macd - prev2_signal):.4f}\n\n"
         
         f"🎯 Trading Conditions:\n"
         f"ADX: {adx:.2f} (>{params['adx_threshold']}: {adx > params['adx_threshold']})\n"
@@ -406,9 +435,9 @@ def trade_logic():
         f"Volatility OK: {is_volatile}\n"
         f"Volume OK: {is_volume_ok}\n\n"
         
-        f"🔄 Entry Conditions:\n"
-        f"Long Ready: {macd > macd_signal and prev_macd <= prev_signal and is_long_trend and is_volatile}\n"
-        f"Short Ready: {macd < macd_signal and prev_macd >= prev_signal and is_short_trend and is_volume_ok and is_volatile}\n"
+        f"🔄 Entry Conditions Summary:\n"
+        f"Long Entry Ready: {'✅' if (macd > macd_signal and (prev_macd <= prev_signal or prev2_macd <= prev2_signal) and is_long_trend and is_volatile) else '❌'}\n"
+        f"Short Entry Ready: {'✅' if (macd < macd_signal and (prev_macd >= prev_signal or prev2_macd >= prev2_signal) and is_short_trend and is_volume_ok and is_volatile) else '❌'}\n"
     )
 
     # Check if there are any pending orders
