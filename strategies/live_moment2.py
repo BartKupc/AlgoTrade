@@ -202,7 +202,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
             macd < macd_signal                                          # MACD negative
         )
 
-    # Return true if either standard conditions or strong momentum override is met
+    # Return both standard conditions and strong momentum status
     standard_conditions = (macd_condition and price_condition and volume_condition)
     
     if strong_momentum:
@@ -211,7 +211,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         logging.info(f"Volume ratio: {volume_ratio:.2f}x average")
         logging.info(f"Bid/Ask ratio: {(bid_volume/ask_volume):.2f}")
     
-    return standard_conditions or strong_momentum
+    return standard_conditions, strong_momentum
 
 def check_exit_conditions(data, current_price, position_side):
     """Check exit conditions using 1h OHLC and current price"""
@@ -352,12 +352,97 @@ def trade_logic():
     logging.info(f"Price Movement: {price_momentum.upper()}")
     logging.info(f"Aligned with MACD Trend: {'YES' if (macd_increasing and price_momentum != 'down') or (macd_decreasing and price_momentum != 'up') else 'NO'}")
     
-    # Check entry conditions early (before creating messages)
-    long_entry = False
-    short_entry = False
+    # Only proceed with new orders if no position exists
     if not has_position:
-        long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
-        short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
+        # Check entry conditions
+        long_standard, long_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
+        short_standard, short_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
+        
+        # Determine if we should enter
+        long_entry = long_standard or long_momentum
+        short_entry = short_standard or short_momentum
+        
+        if long_entry or short_entry:
+            side = 'buy' if long_entry else 'sell'
+            is_momentum_entry = long_momentum if long_entry else short_momentum
+            
+            # Calculate position size
+            quantity = calculate_position_size(current_price)
+            if quantity is None:
+                logging.warning("Failed to calculate position size")
+                return
+            
+            logging.info(f"\n=== Placing New {side.upper()} Order ===")
+            logging.info(f"Amount: {quantity} contracts")
+            logging.info(f"Entry Price: ${current_price:.2f}")
+            
+            try:
+                # Use market order for momentum entries, limit order for standard entries
+                if is_momentum_entry:
+                    entry_order = bitget.place_market_order(
+                        symbol=params['symbol'],
+                        side=side,
+                        amount=quantity
+                    )
+                    entry_price = current_price  # Use current price for market orders
+                else:
+                    entry_price = current_price * (1.001 if long_entry else 0.999)
+                    entry_order = bitget.place_limit_order(
+                        symbol=params['symbol'],
+                        side=side,
+                        amount=quantity,
+                        price=entry_price
+                    )
+                
+                # Log the opened trade
+                log_trade(
+                    action="OPEN",
+                    side=side,
+                    entry_price=current_price,  # Use current price for market order
+                    contracts=quantity,
+                    exit_price=None,
+                    pnl=None,
+                    duration=None
+                )
+                
+                logging.info(f"Entry order placed: {entry_order['id']}")
+                
+                # Place stop loss and take profit orders
+                stop_loss = current_price * (1 - params['stop_loss_pct'] if side == 'buy' else 1 + params['stop_loss_pct'])
+                take_profit = current_price * (1 + params['take_profit_pct'] if side == 'buy' else 1 - params['take_profit_pct'])
+                
+                sl_order = bitget.place_trigger_market_order(
+                    symbol=params['symbol'],
+                    side='sell' if side == 'buy' else 'buy',
+                    amount=quantity,
+                    trigger_price=stop_loss,
+                    reduce=True
+                )
+                logging.info(f"Stop Loss order placed: {sl_order['id']} at ${stop_loss:.2f}")
+                
+                tp_order = bitget.place_trigger_market_order(
+                    symbol=params['symbol'],
+                    side='sell' if side == 'buy' else 'buy',
+                    amount=quantity,
+                    trigger_price=take_profit,
+                    reduce=True
+                )
+                logging.info(f"Take Profit order placed: {tp_order['id']} at ${take_profit:.2f}")
+                
+                # Send detailed Telegram message about the entry
+                entry_message = (
+                    f"🚨 NEW {side.upper()} POSITION OPENED 🚨\n"
+                    f"Price: ${entry_price:.2f}\n"
+                    f"Size: {quantity} contracts\n"
+                    f"Stop Loss: ${stop_loss:.2f}\n"
+                    f"Take Profit: ${take_profit:.2f}\n"
+                    f"Reason: {'Strong Momentum Override' if is_momentum_entry else 'Standard Entry'}"
+                )
+                send_telegram_message(entry_message)
+                
+            except Exception as e:
+                logging.error(f"Error placing orders: {str(e)}")
+                send_telegram_message(f"⚠️ Error placing orders: {str(e)}")
 
     # Get position details if any exists
     position_info = "No Position"
