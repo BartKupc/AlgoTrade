@@ -178,7 +178,7 @@ def calculate_position_size(close_price):
         return None
 
 def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, direction='long'):
-    """Check entry conditions with strong momentum override"""
+    """Check entry conditions with time-weighted momentum override"""
     last_row = data.iloc[-1]
     macd, macd_signal, ema9 = last_row[['macd', 'macd_signal', 'ema9']]
     
@@ -189,49 +189,73 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         data.iloc[-3]['macd'] - data.iloc[-3]['macd_signal']
     ]
     
-    # Volume analysis
+    # Time-weighted price change analysis (last 15 minutes)
+    recent_prices = []
+    for i in range(15):  # Check last 15 minutes
+        try:
+            minute_price = bitget.fetch_ticker(params['symbol'])['last']
+            recent_prices.append(minute_price)
+            time.sleep(0.2)  # Small delay to avoid API rate limits
+        except Exception as e:
+            logging.error(f"Error fetching minute price: {str(e)}")
+            continue
+    
+    if len(recent_prices) >= 3:  # Need at least 3 price points
+        # Calculate weighted price changes (more recent = higher weight)
+        price_changes = []
+        weights = []
+        for i in range(len(recent_prices)-1):
+            change = (recent_prices[i+1] - recent_prices[i]) / recent_prices[i]
+            # Exponential weight decay (more recent changes matter more)
+            weight = 0.85 ** i  # 0.85^0 = 1, 0.85^1 = 0.85, 0.85^2 = 0.72, etc.
+            price_changes.append(change)
+            weights.append(weight)
+        
+        # Calculate weighted average price change
+        weighted_price_change = sum(c * w for c, w in zip(price_changes, weights)) / sum(weights)
+        
+        logging.info(f"Weighted price change (last 15min): {weighted_price_change*100:.2f}%")
+        logging.info(f"Recent price changes: {[f'{c*100:.2f}%' for c in price_changes]}")
+    else:
+        weighted_price_change = price_change_pct
+    
+    # Volume analysis with time weighting
     avg_hourly_volume = data['volume'].tail(4).mean()
     avg_minute_volume = avg_hourly_volume / 60
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
-    # Standard conditions
     if direction == 'long':
-        price_condition = (current_price > ema9 * (1 + params['ema_threshold']))
-        macd_condition = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
-        volume_condition = volume_acceptable and (bid_volume > ask_volume * 1.2)
-        
-        # Strong momentum override for longs
+        # Strong momentum override for longs with time weighting
         strong_momentum = (
-            price_change_pct > params['strong_momentum_threshold'] and  # Big price move up
-            volume_ratio > params['strong_volume_multiplier'] and       # High volume
-            bid_volume > ask_volume * 1.5 and                          # Strong buying pressure
-            current_price > ema9 and                                   # Above EMA
-            macd > macd_signal                                         # MACD positive
+            weighted_price_change > params['strong_momentum_threshold'] and  # Sustained price move up
+            price_change_pct > params['strong_momentum_threshold'] * 0.7 and # Current move still significant
+            volume_ratio > params['strong_volume_multiplier'] and           # High volume
+            bid_volume > ask_volume * 1.5 and                              # Strong buying pressure
+            current_price > ema9 and                                       # Above EMA
+            macd > macd_signal and                                         # MACD positive
+            all(p > ema9 for p in recent_prices[-5:])                      # Price stayed above EMA
         )
     else:  # short
-        price_condition = (current_price < ema9 * (1 - params['ema_threshold']))
-        macd_condition = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
-        volume_condition = volume_acceptable and (ask_volume > bid_volume * 1.2)
-        
-        # Strong momentum override for shorts
+        # Strong momentum override for shorts with time weighting
         strong_momentum = (
-            price_change_pct < -params['strong_momentum_threshold'] and  # Big price move down
-            volume_ratio > params['strong_volume_multiplier'] and        # High volume
-            ask_volume > bid_volume * 1.5 and                           # Strong selling pressure
-            current_price < ema9 and                                    # Below EMA
-            macd < macd_signal                                          # MACD negative
+            weighted_price_change < -params['strong_momentum_threshold'] and # Sustained price move down
+            price_change_pct < -params['strong_momentum_threshold'] * 0.7 and # Current move still significant
+            volume_ratio > params['strong_volume_multiplier'] and            # High volume
+            ask_volume > bid_volume * 1.5 and                               # Strong selling pressure
+            current_price < ema9 and                                        # Below EMA
+            macd < macd_signal and                                          # MACD negative
+            all(p < ema9 for p in recent_prices[-5:])                       # Price stayed below EMA
         )
 
-    # Return both standard conditions and strong momentum status
-    standard_conditions = (macd_condition and price_condition and volume_condition)
-    
     if strong_momentum:
-        logging.info(f"Strong momentum override triggered for {direction.upper()}!")
-        logging.info(f"Price change: {price_change_pct*100:.2f}%")
-        logging.info(f"Volume ratio: {volume_ratio:.2f}x average")
-        logging.info(f"Bid/Ask ratio: {(bid_volume/ask_volume):.2f}")
-    
+        logging.info("\n=== Strong Momentum Analysis ===")
+        logging.info(f"Weighted Price Change: {weighted_price_change*100:.2f}%")
+        logging.info(f"Current Price Change: {price_change_pct*100:.2f}%")
+        logging.info(f"Volume Ratio: {volume_ratio:.2f}x")
+        logging.info(f"Price/EMA Consistency: {'All Above' if direction=='long' else 'All Below'} EMA")
+        logging.info(f"MACD Alignment: {'Positive' if macd > macd_signal else 'Negative'}")
+
     return standard_conditions, strong_momentum
 
 def check_exit_conditions(data, current_price, position_side):
