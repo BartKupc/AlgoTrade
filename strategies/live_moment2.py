@@ -518,20 +518,23 @@ def trade_logic():
                     stop_loss = entry_price * (1 - params['stop_loss_pct'])    # Below entry
                     take_profit = entry_price * (1 + params['take_profit_pct']) # Above entry
                     close_side = 'sell'  # Close long position with sell
+                    trigger_type = 'down'  # Trigger when price goes down for long SL
                 else:  # Short position
                     stop_loss = entry_price * (1 + params['stop_loss_pct'])    # Above entry
                     take_profit = entry_price * (1 - params['take_profit_pct']) # Below entry
                     close_side = 'buy'   # Close short position with buy
+                    trigger_type = 'up'  # Trigger when price goes up for short SL
                 
-                # Place SL order
+                # Place SL order with correct trigger direction
                 sl_order = bitget.place_trigger_market_order(
                     symbol=params['symbol'],
                     side=close_side,  # Use the correct closing side
                     amount=quantity,
                     trigger_price=stop_loss,
+                    trigger_type=trigger_type,  # Add trigger direction
                     reduce=True
                 )
-                logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f}")
+                logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f} (trigger {trigger_type})")
                 
                 # Place TP order
                 tp_order = bitget.place_trigger_market_order(
@@ -539,6 +542,7 @@ def trade_logic():
                     side=close_side,  # Use the correct closing side
                     amount=quantity,
                     trigger_price=take_profit,
+                    trigger_type='up' if side == 'buy' else 'down',  # TP trigger opposite to SL
                     reduce=True
                 )
                 logging.info(f"Take Profit order placed for {side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
