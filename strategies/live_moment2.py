@@ -270,6 +270,18 @@ def trade_logic():
     position = bitget.fetch_open_positions(params['symbol'])
     has_position = len(position) > 0
     
+    # If no position is open, cancel all trigger orders
+    if not has_position:
+        try:
+            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            if trigger_orders:
+                logging.info("Cancelling orphaned trigger orders:")
+                for order in trigger_orders:
+                    bitget.cancel_trigger_order(order['id'], params['symbol'])
+                    logging.info(f"[*] Cancelled order {order['id']}")
+        except Exception as e:
+            logging.error(f"Error cancelling trigger orders: {str(e)}")
+    
     # Log current market state with trading implications
     logging.info(f"Current Price: ${current_price:.2f}")
     logging.info(f"Current Volume: {current_volume:.2f}")
@@ -340,141 +352,12 @@ def trade_logic():
     logging.info(f"Price Movement: {price_momentum.upper()}")
     logging.info(f"Aligned with MACD Trend: {'YES' if (macd_increasing and price_momentum != 'down') or (macd_decreasing and price_momentum != 'up') else 'NO'}")
     
-    # Trading Signal Analysis
-    logging.info("\n=== Trading Signal Analysis ===")
-    logging.info("LONG Signal Analysis:")
-    logging.info(f"[*] MACD Status: {macd_status}")
-    logging.info(f"[*] MACD Momentum: {'YES' if macd_increasing else 'NO'} (needs 3 increasing bars)")
-    logging.info(f"[*] Price Above EMA9: {current_price > ema9}")
-    logging.info(f"[*] Volume Acceptable: {volume_ratio > 0.7}")
-    logging.info(f"[*] Bid/Ask Pressure Bullish: {bid_ask_ratio > 1}")
-    logging.info(f"[*] Real-time Price Momentum: {price_momentum.upper()}")
-    
-    logging.info("\nSHORT Signal Analysis:")
-    logging.info(f"[*] MACD Status: {macd_status}")
-    logging.info(f"[*] MACD Momentum: {'YES' if macd_decreasing else 'NO'} (needs 3 decreasing bars)")
-    logging.info(f"[*] Price Below EMA9: {current_price < ema9}")
-    logging.info(f"[*] Volume Acceptable: {volume_ratio > 0.7}")
-    logging.info(f"[*] Bid/Ask Pressure Bearish: {bid_ask_ratio < 1}")
-    logging.info(f"[*] Real-time Price Momentum: {price_momentum.upper()}")
-
-    # Check entry conditions with detailed analysis
-    long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
-    short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
-    
-    logging.info("\n=== Trading Recommendation ===")
-    if long_entry:
-        logging.info(">> STRONG LONG OPPORTUNITY - All conditions met")
-    elif short_entry:
-        logging.info(">> STRONG SHORT OPPORTUNITY - All conditions met")
-    else:
-        logging.info(">> WAIT - Conditions not optimal for entry")
-        if macd > macd_signal:
-            logging.info("Watching for long setup (MACD bullish but other conditions not met)")
-        else:
-            logging.info("Watching for short setup (MACD bearish but other conditions not met)")
-
-    # If no position is open, cancel all trigger orders
+    # Check entry conditions early (before creating messages)
+    long_entry = False
+    short_entry = False
     if not has_position:
-        try:
-            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
-            if trigger_orders:
-                logging.info("Cancelling orphaned trigger orders:")
-                for order in trigger_orders:
-                    bitget.cancel_trigger_order(order['id'], params['symbol'])
-                    logging.info(f"✓ Cancelled order {order['id']}")
-        except Exception as e:
-            logging.error(f"Error cancelling trigger orders: {str(e)}")
-    
-    # Position Management
-    if has_position:
-        pos = position[0]
-        entry_price = float(pos['info']['openPriceAvg'])
-        unrealized_pnl = float(pos['info'].get('unrealisedPnl', 0))
-        
-        logging.info("\n=== Position Status ===")
-        logging.info(f"Current Position: {pos['side'].upper()} {pos['contracts']} contracts")
-        logging.info(f"Entry Price: ${entry_price:.2f}")
-        logging.info(f"Unrealized PnL: ${unrealized_pnl:.2f}")
-        
-        if check_exit_conditions(data, current_price, pos['side']):
-            logging.info(f"🚨 Exit conditions met for {pos['side']} position")
-            logging.info(f"Closing position at ${current_price:.2f}")
-            
-            # Log the closed trade
-            duration = (datetime.now() - pd.to_datetime(pos['info']['openTime'])).total_seconds() / 3600  # hours
-            log_trade(
-                action="CLOSE",
-                side=pos['side'],
-                entry_price=entry_price,
-                exit_price=current_price,
-                contracts=pos['contracts'],
-                pnl=unrealized_pnl,
-                duration=f"{duration:.1f}h"
-            )
-            
-            bitget.flash_close_position(params['symbol'])
-            return
-
-    # Place orders based on conditions
-    quantity = calculate_position_size(current_price)
-    if quantity is None:
-        logging.warning("Failed to calculate position size")
-        return
-
-    if long_entry or short_entry:
-        side = 'buy' if long_entry else 'sell'
-        entry_price = current_price * (1.001 if long_entry else 0.999)
-        
-        logging.info(f"\n=== Placing New {side.upper()} Order ===")
-        logging.info(f"Amount: {quantity} contracts")
-        logging.info(f"Entry Price: ${entry_price:.2f}")
-        
-        # Place entry order and stop loss/take profit
-        entry_order = bitget.place_limit_order(
-            symbol=params['symbol'],
-            side=side,
-            amount=quantity,
-            price=entry_price
-        )
-        
-        # Log the opened trade
-        log_trade(
-            action="OPEN",
-            side=side,
-            entry_price=entry_price,
-            contracts=quantity,
-            exit_price=None,
-            pnl=None,
-            duration=None
-        )
-        
-        logging.info(f"Entry order placed: {entry_order['id']}")
-        
-        stop_loss = entry_price * (1 - params['stop_loss_pct'])
-        take_profit = entry_price * (1 + params['take_profit_pct'])
-        
-        # Log SL/TP levels
-        logging.info(f"Stop Loss: ${stop_loss:.2f} ({params['stop_loss_pct']*100:.1f}%)")
-        logging.info(f"Take Profit: ${take_profit:.2f} ({params['take_profit_pct']*100:.1f}%)")
-        
-        sl_order = bitget.place_trigger_market_order(
-            symbol=params['symbol'],
-            side='sell' if side == 'buy' else 'buy',
-            amount=quantity,
-            trigger_price=stop_loss,
-            reduce=True
-        )
-        logging.info(f"Stop Loss order placed: {sl_order['id']}")
-        
-        tp_order = bitget.place_trigger_market_order(
-            symbol=params['symbol'],
-            side='sell' if side == 'buy' else 'buy',
-            amount=quantity,
-            trigger_price=take_profit,
-            reduce=True
-        )
-        logging.info(f"Take Profit order placed: {tp_order['id']}")
+        long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
+        short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
 
     # Get position details if any exists
     position_info = "No Position"
@@ -521,7 +404,7 @@ def trade_logic():
     logging.info(f"[*] High Volume: {'YES' if volume_ratio > params['strong_volume_multiplier'] else 'NO'}")
     logging.info(f"[*] Strong Order Book Pressure: {'YES' if max(bid_volume/ask_volume, ask_volume/bid_volume) > 1.5 else 'NO'}")
     
-    # Create enhanced Telegram message
+    # Now create the message with the entry signals
     message = (
         f"=== Momentum Bot Status Update ===\n\n"
         
@@ -557,10 +440,9 @@ def trade_logic():
         f"[*] Volume Acceptable: {volume_ratio > 0.7}\n"
         f"[*] Bearish Pressure: {bid_ask_ratio < 1}\n"
         f"Final Short Signal: {short_entry}\n\n"
-        
-        f"Trading Recommendation:\n"
     )
 
+    # Add trading recommendation
     if long_entry:
         message += ">> STRONG LONG OPPORTUNITY - All conditions met"
     elif short_entry:
@@ -599,6 +481,18 @@ def trade_logic():
 if __name__ == "__main__":
     try:
         logging.info("Starting momentum trading bot...")
+        
+        # Clean up any existing trigger orders at startup
+        try:
+            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            if trigger_orders:
+                logging.info("Cleaning up existing trigger orders at startup:")
+                for order in trigger_orders:
+                    bitget.cancel_trigger_order(order['id'], params['symbol'])
+                    logging.info(f"[*] Cancelled order {order['id']}")
+        except Exception as e:
+            logging.error(f"Error cleaning up trigger orders at startup: {str(e)}")
+        
         trade_logic()
         logging.info("Trade logic execution completed")
     except Exception as e:
