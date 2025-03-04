@@ -81,7 +81,7 @@ def fetch_data():
             params['symbol'], 
             params['timeframe'], 
             params['limit']
-        ).iloc[:-1]
+        ).iloc[:-1]  # Get completed candles
         
         # Calculate indicators for 1h timeframe
         data['macd'] = ta.trend.macd(data['close'])
@@ -90,18 +90,27 @@ def fetch_data():
         
         # Get real-time market data
         ticker = bitget.fetch_ticker(params['symbol'])
+        current_price = ticker['last']
         orderbook = bitget.fetch_order_book(params['symbol'])
         
-        # Get real-time volume data (last minute)
-        recent_trades = bitget.fetch_recent_trades(params['symbol'], limit=100)
-        current_minute_volume = sum(trade['amount'] for trade in recent_trades 
-                                  if trade['timestamp'] > (time.time() * 1000 - 60000))
+        # Calculate price movement from last candle's close
+        last_candle_close = data.iloc[-1]['close']
+        price_change_pct = (current_price - last_candle_close) / last_candle_close
         
-        # Calculate order book volumes
+        # Determine trend (using 0.2% threshold)
+        if price_change_pct > 0.005:  # More than 0.2% up
+            price_momentum = "up"
+        elif price_change_pct < -0.005:  # More than 0.2% down
+            price_momentum = "down"
+        else:
+            price_momentum = "sideways"
+        
+        # Get volume data
+        current_minute_volume = ticker['quoteVolume']  # Current volume
         bid_volume = sum(bid[1] for bid in orderbook['bids'][:5])
         ask_volume = sum(ask[1] for ask in orderbook['asks'][:5])
         
-        return data, ticker['last'], current_minute_volume, bid_volume, ask_volume
+        return data, current_price, current_minute_volume, bid_volume, ask_volume, price_momentum, price_change_pct
     except Exception as e:
         logging.error(f"Error fetching data: {str(e)}")
         raise
@@ -145,38 +154,40 @@ def calculate_position_size(close_price):
         print(f"Error calculating position size: {e}")
         return None
 
-def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, direction='long'):
+def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, direction='long'):
     """Check entry conditions using both real-time and historical data"""
     last_row = data.iloc[-1]
-    prev_row = data.iloc[-2]
     macd, macd_signal, ema9 = last_row[['macd', 'macd_signal', 'ema9']]
     
-    # Get previous MACD differences from hourly data
+    # Get previous MACD differences
     macd_diffs = [
         macd - macd_signal,
         data.iloc[-2]['macd'] - data.iloc[-2]['macd_signal'],
         data.iloc[-3]['macd'] - data.iloc[-3]['macd_signal']
     ]
     
-    # Volume analysis combining historical and real-time data
-    avg_hourly_volume = data['volume'].tail(4).mean()  # Last 4 hours average
+    # Volume analysis
+    avg_hourly_volume = data['volume'].tail(4).mean()
     avg_minute_volume = avg_hourly_volume / 60
-    
-    # Real-time volume checks
     volume_ratio = current_volume / avg_minute_volume
-    volume_acceptable = volume_ratio > 0.7  # Accept 70% of average volume
+    volume_acceptable = volume_ratio > 0.7
+
+    # Check real-time price momentum against intended direction
+    momentum_aligned = (
+        (direction == 'long' and price_momentum == "up") or
+        (direction == 'short' and price_momentum == "down")
+    )
     
-    # Order book pressure analysis
     if direction == 'long':
         price_condition = (current_price > ema9 * (1 + params['ema_threshold']))
         macd_condition = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
-        volume_condition = volume_acceptable and (bid_volume > ask_volume * 1.2)  # 20% more bids than asks
+        volume_condition = volume_acceptable and (bid_volume > ask_volume * 1.2)
     else:  # short
         price_condition = (current_price < ema9 * (1 - params['ema_threshold']))
         macd_condition = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
-        volume_condition = volume_acceptable and (ask_volume > bid_volume * 1.2)  # 20% more asks than bids
+        volume_condition = volume_acceptable and (ask_volume > bid_volume * 1.2)
     
-    return (macd_condition and price_condition and volume_condition)
+    return (macd_condition and price_condition and volume_condition and momentum_aligned)
 
 def check_exit_conditions(data, current_price, position_side):
     """Check exit conditions using 1h OHLC and current price"""
@@ -223,7 +234,7 @@ def log_trade(action, side, entry_price, exit_price=None, contracts=None, pnl=No
 
 def trade_logic():
     logging.info("Fetching and processing data...")
-    data, current_price, current_volume, bid_volume, ask_volume = fetch_data()
+    data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct = fetch_data()
     
     # Calculate volume metrics early
     avg_hourly_volume = data['volume'].tail(4).mean()
@@ -276,20 +287,18 @@ def trade_logic():
     macd_decreasing = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
     
     # Determine MACD trend status
-    if macd > macd_signal:
-        if macd_increasing:
-            macd_trend = "Strong Bullish (MACD positive and increasing for 3 bars)"
-            macd_status = "BULLISH MOMENTUM"
-        else:
-            macd_trend = "Weakly Bullish (MACD positive but not consistently increasing)"
-            macd_status = "MACD positive but no momentum"
+    if macd_increasing:
+        macd_trend = "Strong Bullish (MACD increasing for 3 bars)"
+        macd_status = "BULLISH MOMENTUM"
+    elif macd_decreasing:
+        macd_trend = "Strong Bearish (MACD decreasing for 3 bars)"
+        macd_status = "BEARISH MOMENTUM"
+    elif macd > macd_signal:
+        macd_trend = "MACD above signal but no momentum"
+        macd_status = "MACD POSITIVE (no momentum)"
     else:
-        if macd_decreasing:
-            macd_trend = "Strong Bearish (MACD negative and decreasing for 3 bars)"
-            macd_status = "BEARISH MOMENTUM"
-        else:
-            macd_trend = "Weakly Bearish (MACD negative but not consistently decreasing)"
-            macd_status = "MACD negative but no momentum"
+        macd_trend = "MACD below signal but no momentum"
+        macd_status = "MACD NEGATIVE (no momentum)"
 
     # Log MACD analysis
     logging.info("\n=== MACD Analysis ===")
@@ -299,6 +308,14 @@ def trade_logic():
     logging.info(f"MACD Trend: {macd_trend}")
     logging.info(f"MACD Status: {macd_status}")
     
+    # Add real-time price movement analysis
+    logging.info("\n=== Real-time Price Analysis ===")
+    logging.info(f"Last Candle Close: ${data.iloc[-1]['close']:.2f}")
+    logging.info(f"Current Price: ${current_price:.2f}")
+    logging.info(f"Price Change: {price_change_pct*100:.2f}%")
+    logging.info(f"Price Movement: {price_momentum.upper()}")
+    logging.info(f"Aligned with MACD Trend: {'YES' if (macd_increasing and price_momentum != 'down') or (macd_decreasing and price_momentum != 'up') else 'NO'}")
+    
     # Trading Signal Analysis
     logging.info("\n=== Trading Signal Analysis ===")
     logging.info("LONG Signal Analysis:")
@@ -307,6 +324,7 @@ def trade_logic():
     logging.info(f"[*] Price Above EMA9: {current_price > ema9}")
     logging.info(f"[*] Volume Acceptable: {volume_ratio > 0.7}")
     logging.info(f"[*] Bid/Ask Pressure Bullish: {bid_ask_ratio > 1}")
+    logging.info(f"[*] Real-time Price Momentum: {price_momentum.upper()}")
     
     logging.info("\nSHORT Signal Analysis:")
     logging.info(f"[*] MACD Status: {macd_status}")
@@ -314,10 +332,11 @@ def trade_logic():
     logging.info(f"[*] Price Below EMA9: {current_price < ema9}")
     logging.info(f"[*] Volume Acceptable: {volume_ratio > 0.7}")
     logging.info(f"[*] Bid/Ask Pressure Bearish: {bid_ask_ratio < 1}")
+    logging.info(f"[*] Real-time Price Momentum: {price_momentum.upper()}")
 
     # Check entry conditions with detailed analysis
-    long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, 'long')
-    short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, 'short')
+    long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, 'long')
+    short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, 'short')
     
     logging.info("\n=== Trading Recommendation ===")
     if long_entry:
