@@ -421,9 +421,13 @@ def trade_logic():
         if not (has_sl and has_tp):
             logging.info("Missing SL/TP orders detected. Placing new orders...")
             
-            # Calculate SL/TP levels
-            stop_loss = entry_price * (1 - params['stop_loss_pct'] if side == 'buy' else 1 + params['stop_loss_pct'])
-            take_profit = entry_price * (1 + params['take_profit_pct'] if side == 'buy' else 1 - params['take_profit_pct'])
+            # Calculate SL/TP levels - Fixed for correct long/short logic
+            if side == 'buy':  # Long position
+                stop_loss = entry_price * (1 - params['stop_loss_pct'])    # Below entry
+                take_profit = entry_price * (1 + params['take_profit_pct']) # Above entry
+            else:  # Short position
+                stop_loss = entry_price * (1 + params['stop_loss_pct'])    # Above entry
+                take_profit = entry_price * (1 - params['take_profit_pct']) # Below entry
             
             # Place missing stop loss
             if not has_sl:
@@ -435,7 +439,7 @@ def trade_logic():
                         trigger_price=stop_loss,
                         reduce=True
                     )
-                    logging.info(f"Stop Loss order placed: {sl_order['id']} at ${stop_loss:.2f}")
+                    logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f}")
                 except Exception as e:
                     logging.error(f"Error placing SL order: {str(e)}")
             
@@ -449,7 +453,7 @@ def trade_logic():
                         trigger_price=take_profit,
                         reduce=True
                     )
-                    logging.info(f"Take Profit order placed: {tp_order['id']} at ${take_profit:.2f}")
+                    logging.info(f"Take Profit order placed for {side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
                 except Exception as e:
                     logging.error(f"Error placing TP order: {str(e)}")
         else:
@@ -457,8 +461,8 @@ def trade_logic():
         
         # Log position details
         logging.info(f"Current Position: {side.upper()} {size} contracts @ ${entry_price:.2f}")
-        logging.info(f"Stop Loss: {'Present' if has_sl else 'Missing'}")
-        logging.info(f"Take Profit: {'Present' if has_tp else 'Missing'}")
+        logging.info(f"Stop Loss: {'Present' if has_sl else 'Missing'} (${stop_loss:.2f})")
+        logging.info(f"Take Profit: {'Present' if has_tp else 'Missing'} (${take_profit:.2f})")
     
     # Now create the message with the entry signals
     message = (
