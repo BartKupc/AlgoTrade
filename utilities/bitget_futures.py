@@ -298,3 +298,17 @@ class BitgetFutures():
                 return None
             else:
                 raise err
+
+    def fetch_order_book(self, symbol: str) -> Dict[str, Any]:
+        """Fetch current order book data"""
+        try:
+            return self.session.fetch_order_book(symbol)
+        except Exception as e:
+            raise Exception(f"Failed to fetch order book for {symbol}: {e}")
+
+    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
+        """Fetch recent trades for a symbol"""
+        try:
+            return self.session.fetch_trades(symbol, limit=limit)
+        except Exception as e:
+            raise Exception(f"Failed to fetch recent trades for {symbol}: {e}")
