@@ -56,8 +56,8 @@ params = {
     'limit': 100,
     'ema_period': 9,
     'ema_threshold': 0.006,
-    'stop_loss_pct': 0.01,
-    'take_profit_pct': 0.10,
+    'stop_loss_pct': 0.01,      # 1% stop loss
+    'take_profit_pct': 0.04,    # Changed from 10% to 2% for more frequent profits
     'leverage': 3,
     'max_short_duration': 48,
     'short_underwater_threshold': -0.02,
