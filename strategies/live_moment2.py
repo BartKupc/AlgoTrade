@@ -423,8 +423,9 @@ def trade_logic():
     
     # Only proceed with new orders if no position exists
     if not has_position:
-        # Check if we should be trading
+        # Check if we should be trading (MOVED THIS CHECK BEFORE ANY ENTRY LOGIC)
         if not check_recent_trades():
+            logging.info("Skipping trade: In cooldown period after recent loss")
             return
         
         # Check entry conditions
@@ -451,6 +452,13 @@ def trade_logic():
         if long_entry or short_entry:
             side = 'buy' if long_entry else 'sell'
             is_momentum_entry = long_momentum if long_entry else short_momentum
+            
+            logging.info(f"\n=== Entry Analysis ===")
+            logging.info(f"Entry Type: {'Strong Momentum' if is_momentum_entry else 'Standard'}")
+            logging.info(f"Direction: {side.upper()}")
+            logging.info(f"Price Movement: {price_momentum}")
+            logging.info(f"Volume Ratio: {volume_ratio:.2f}x")
+            logging.info(f"Bid/Ask Ratio: {bid_ask_ratio:.2f}")
             
             # Calculate position size
             quantity = calculate_position_size(current_price)
