@@ -60,7 +60,9 @@ params = {
     'take_profit_pct': 0.10,
     'leverage': 3,
     'max_short_duration': 48,
-    'short_underwater_threshold': -0.02
+    'short_underwater_threshold': -0.02,
+    'strong_momentum_threshold': 0.015,  # 1.5% price move
+    'strong_volume_multiplier': 2.0,     # 2x average volume
 }
 
 # Load API keys
@@ -154,8 +156,8 @@ def calculate_position_size(close_price):
         print(f"Error calculating position size: {e}")
         return None
 
-def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, direction='long'):
-    """Check entry conditions using both real-time and historical data"""
+def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, direction='long'):
+    """Check entry conditions with strong momentum override"""
     last_row = data.iloc[-1]
     macd, macd_signal, ema9 = last_row[['macd', 'macd_signal', 'ema9']]
     
@@ -172,22 +174,44 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
-    # Check real-time price momentum against intended direction
-    momentum_aligned = (
-        (direction == 'long' and price_momentum == "up") or
-        (direction == 'short' and price_momentum == "down")
-    )
-    
+    # Standard conditions
     if direction == 'long':
         price_condition = (current_price > ema9 * (1 + params['ema_threshold']))
         macd_condition = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
         volume_condition = volume_acceptable and (bid_volume > ask_volume * 1.2)
+        
+        # Strong momentum override for longs
+        strong_momentum = (
+            price_change_pct > params['strong_momentum_threshold'] and  # Big price move up
+            volume_ratio > params['strong_volume_multiplier'] and       # High volume
+            bid_volume > ask_volume * 1.5 and                          # Strong buying pressure
+            current_price > ema9 and                                   # Above EMA
+            macd > macd_signal                                         # MACD positive
+        )
     else:  # short
         price_condition = (current_price < ema9 * (1 - params['ema_threshold']))
         macd_condition = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
         volume_condition = volume_acceptable and (ask_volume > bid_volume * 1.2)
+        
+        # Strong momentum override for shorts
+        strong_momentum = (
+            price_change_pct < -params['strong_momentum_threshold'] and  # Big price move down
+            volume_ratio > params['strong_volume_multiplier'] and        # High volume
+            ask_volume > bid_volume * 1.5 and                           # Strong selling pressure
+            current_price < ema9 and                                    # Below EMA
+            macd < macd_signal                                          # MACD negative
+        )
+
+    # Return true if either standard conditions or strong momentum override is met
+    standard_conditions = (macd_condition and price_condition and volume_condition)
     
-    return (macd_condition and price_condition and volume_condition and momentum_aligned)
+    if strong_momentum:
+        logging.info(f"Strong momentum override triggered for {direction.upper()}!")
+        logging.info(f"Price change: {price_change_pct*100:.2f}%")
+        logging.info(f"Volume ratio: {volume_ratio:.2f}x average")
+        logging.info(f"Bid/Ask ratio: {(bid_volume/ask_volume):.2f}")
+    
+    return standard_conditions or strong_momentum
 
 def check_exit_conditions(data, current_price, position_side):
     """Check exit conditions using 1h OHLC and current price"""
@@ -335,8 +359,8 @@ def trade_logic():
     logging.info(f"[*] Real-time Price Momentum: {price_momentum.upper()}")
 
     # Check entry conditions with detailed analysis
-    long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, 'long')
-    short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, 'short')
+    long_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
+    short_entry = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
     
     logging.info("\n=== Trading Recommendation ===")
     if long_entry:
@@ -487,6 +511,15 @@ def trade_logic():
     logging.info(f"Volume Acceptable: {volume_ratio > 0.7}")
     logging.info(f"Bid/Ask Ratio: {(bid_volume/ask_volume):.2f}")
     logging.info(f"Order Book Pressure: {'Buying' if bid_volume > ask_volume else 'Selling'}")
+    
+    # Add strong momentum analysis to logging
+    logging.info("\n=== Strong Momentum Analysis ===")
+    logging.info(f"Price Change: {price_change_pct*100:.2f}% (Threshold: {params['strong_momentum_threshold']*100:.1f}%)")
+    logging.info(f"Volume Ratio: {volume_ratio:.2f}x (Threshold: {params['strong_volume_multiplier']:.1f}x)")
+    logging.info(f"Strong Momentum Conditions:")
+    logging.info(f"[*] Large Price Move: {'YES' if abs(price_change_pct) > params['strong_momentum_threshold'] else 'NO'}")
+    logging.info(f"[*] High Volume: {'YES' if volume_ratio > params['strong_volume_multiplier'] else 'NO'}")
+    logging.info(f"[*] Strong Order Book Pressure: {'YES' if max(bid_volume/ask_volume, ask_volume/bid_volume) > 1.5 else 'NO'}")
     
     # Create enhanced Telegram message
     message = (
