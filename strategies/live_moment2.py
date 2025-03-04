@@ -374,7 +374,6 @@ def trade_logic():
             
             logging.info(f"\n=== Placing New {side.upper()} Order ===")
             logging.info(f"Amount: {quantity} contracts")
-            logging.info(f"Entry Price: ${current_price:.2f}")
             
             try:
                 # Use market order for momentum entries, limit order for standard entries
@@ -394,49 +393,57 @@ def trade_logic():
                         price=entry_price
                     )
                 
+                logging.info(f"Entry order placed: {entry_order['id']} at ${entry_price:.2f}")
+                
+                # Calculate SL/TP levels based on entry direction
+                if side == 'buy':  # Long position
+                    stop_loss = entry_price * (1 - params['stop_loss_pct'])    # Below entry
+                    take_profit = entry_price * (1 + params['take_profit_pct']) # Above entry
+                    close_side = 'sell'  # Close long position with sell
+                else:  # Short position
+                    stop_loss = entry_price * (1 + params['stop_loss_pct'])    # Above entry
+                    take_profit = entry_price * (1 - params['take_profit_pct']) # Below entry
+                    close_side = 'buy'   # Close short position with buy
+                
+                # Place SL order
+                sl_order = bitget.place_trigger_market_order(
+                    symbol=params['symbol'],
+                    side=close_side,  # Use the correct closing side
+                    amount=quantity,
+                    trigger_price=stop_loss,
+                    reduce=True
+                )
+                logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f}")
+                
+                # Place TP order
+                tp_order = bitget.place_trigger_market_order(
+                    symbol=params['symbol'],
+                    side=close_side,  # Use the correct closing side
+                    amount=quantity,
+                    trigger_price=take_profit,
+                    reduce=True
+                )
+                logging.info(f"Take Profit order placed for {side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
+                
                 # Log the opened trade
                 log_trade(
                     action="OPEN",
                     side=side,
-                    entry_price=current_price,  # Use current price for market order
+                    entry_price=entry_price,
                     contracts=quantity,
                     exit_price=None,
                     pnl=None,
                     duration=None
                 )
                 
-                logging.info(f"Entry order placed: {entry_order['id']}")
-                
-                # Place stop loss and take profit orders
-                stop_loss = current_price * (1 - params['stop_loss_pct'] if side == 'buy' else 1 + params['stop_loss_pct'])
-                take_profit = current_price * (1 + params['take_profit_pct'] if side == 'buy' else 1 - params['take_profit_pct'])
-                
-                sl_order = bitget.place_trigger_market_order(
-                    symbol=params['symbol'],
-                    side='sell' if side == 'buy' else 'buy',
-                    amount=quantity,
-                    trigger_price=stop_loss,
-                    reduce=True
-                )
-                logging.info(f"Stop Loss order placed: {sl_order['id']} at ${stop_loss:.2f}")
-                
-                tp_order = bitget.place_trigger_market_order(
-                    symbol=params['symbol'],
-                    side='sell' if side == 'buy' else 'buy',
-                    amount=quantity,
-                    trigger_price=take_profit,
-                    reduce=True
-                )
-                logging.info(f"Take Profit order placed: {tp_order['id']} at ${take_profit:.2f}")
-                
-                # Send detailed Telegram message about the entry
+                # Send detailed Telegram message
                 entry_message = (
                     f"🚨 NEW {side.upper()} POSITION OPENED 🚨\n"
+                    f"Entry Type: {'Strong Momentum' if is_momentum_entry else 'Standard Entry'}\n"
                     f"Price: ${entry_price:.2f}\n"
                     f"Size: {quantity} contracts\n"
-                    f"Stop Loss: ${stop_loss:.2f}\n"
-                    f"Take Profit: ${take_profit:.2f}\n"
-                    f"Reason: {'Strong Momentum Override' if is_momentum_entry else 'Standard Entry'}"
+                    f"Stop Loss: ${stop_loss:.2f} ({'-' if side == 'buy' else '+'}{params['stop_loss_pct']*100}%)\n"
+                    f"Take Profit: ${take_profit:.2f} ({'+' if side == 'buy' else '-'}{params['take_profit_pct']*100}%)"
                 )
                 send_telegram_message(entry_message)
                 
