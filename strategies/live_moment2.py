@@ -149,11 +149,28 @@ def calculate_position_size(close_price):
     try:
         balance = bitget.fetch_balance()
         usdt_balance = float(balance['USDT']['free'])
-        position_value = usdt_balance * params['leverage']
+        
+        # Use only a portion of the balance (e.g., 95% to account for fees)
+        safe_balance = usdt_balance * 0.95
+        
+        # Calculate position value with leverage
+        position_value = safe_balance * params['leverage']
+        
+        # Calculate quantity in contracts
         quantity = position_value / close_price
-        return float(bitget.amount_to_precision(params['symbol'], quantity))
+        
+        # Round down to avoid exceeding available margin
+        quantity = float(bitget.amount_to_precision(params['symbol'], quantity))
+        
+        logging.info(f"Position Size Calculation:")
+        logging.info(f"Available USDT: ${usdt_balance:.2f}")
+        logging.info(f"Safe Balance (95%): ${safe_balance:.2f}")
+        logging.info(f"Position Value (with {params['leverage']}x leverage): ${position_value:.2f}")
+        logging.info(f"Calculated Quantity: {quantity} contracts")
+        
+        return quantity
     except Exception as e:
-        print(f"Error calculating position size: {e}")
+        logging.error(f"Error calculating position size: {str(e)}")
         return None
 
 def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, direction='long'):
