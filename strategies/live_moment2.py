@@ -352,6 +352,14 @@ def trade_logic():
     logging.info(f"Price Movement: {price_momentum.upper()}")
     logging.info(f"Aligned with MACD Trend: {'YES' if (macd_increasing and price_momentum != 'down') or (macd_decreasing and price_momentum != 'up') else 'NO'}")
     
+    # Initialize entry variables early
+    long_entry = False
+    short_entry = False
+    long_standard = False
+    short_standard = False
+    long_momentum = False
+    short_momentum = False
+    
     # Only proceed with new orders if no position exists
     if not has_position:
         # Check entry conditions
@@ -458,7 +466,7 @@ def trade_logic():
     if has_position:
         try:
             pos = position[0]
-            side = pos['side']
+            position_side = pos['side']
             entry_price = float(pos['info']['openPriceAvg'])
             size = pos['contracts']
             
@@ -471,7 +479,7 @@ def trade_logic():
                 unrealized_pnl = 0.0
                 logging.warning("Could not get unrealized PnL value")
             
-            position_info = f"{side.upper()} {size} contracts"
+            position_info = f"{position_side.upper()} {size} contracts"
             position_entry = f"${entry_price:.2f}"
             position_pnl = f"${unrealized_pnl:.2f}"
         except Exception as e:
@@ -500,66 +508,66 @@ def trade_logic():
     if has_position:
         logging.info("\n=== Position Management ===")
         pos = position[0]
-        side = pos['side']
+        position_side = pos['side']
         entry_price = float(pos['info']['openPriceAvg'])
         size = pos['contracts']
         
+        logging.info(f"Current Position: {position_side.upper()} {size} contracts @ ${entry_price:.2f}")
+        
         # Check for existing trigger orders
         trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
-        has_sl = any(order['info'].get('triggerType') == 'loss' for order in trigger_orders)
-        has_tp = any(order['info'].get('triggerType') == 'profit' for order in trigger_orders)
         
-        # Place missing SL/TP orders
-        if not (has_sl and has_tp):
-            logging.info("Missing SL/TP orders detected. Placing new orders...")
-            
-            # Calculate SL/TP levels - Fixed for correct long/short logic
-            if side == 'buy':  # Long position
-                stop_loss = entry_price * (1 - params['stop_loss_pct'])    # Below entry
-                take_profit = entry_price * (1 + params['take_profit_pct']) # Above entry
-            else:  # Short position
-                stop_loss = entry_price * (1 + params['stop_loss_pct'])    # Above entry
-                take_profit = entry_price * (1 - params['take_profit_pct']) # Below entry
-            
-            # Place missing stop loss
-            if not has_sl:
-                try:
-                    sl_order = bitget.place_trigger_market_order(
-                        symbol=params['symbol'],
-                        side='sell' if side == 'buy' else 'buy',
-                        amount=size,
-                        trigger_price=stop_loss,
-                        reduce=True
-                    )
-                    logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f}")
-                except Exception as e:
-                    logging.error(f"Error placing SL order: {str(e)}")
-            
-            # Place missing take profit
-            if not has_tp:
-                try:
-                    tp_order = bitget.place_trigger_market_order(
-                        symbol=params['symbol'],
-                        side='sell' if side == 'buy' else 'buy',
-                        amount=size,
-                        trigger_price=take_profit,
-                        reduce=True
-                    )
-                    logging.info(f"Take Profit order placed for {side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
-                except Exception as e:
-                    logging.error(f"Error placing TP order: {str(e)}")
-        else:
-            logging.info("SL/TP orders already exist for current position")
+        # Cancel any existing trigger orders before placing new ones
+        if trigger_orders:
+            logging.info("Cancelling existing trigger orders before placing new ones...")
+            for order in trigger_orders:
+                bitget.cancel_trigger_order(order['id'], params['symbol'])
+                logging.info(f"Cancelled order {order['id']}")
         
-        # Log position details
-        logging.info(f"Current Position: {side.upper()} {size} contracts @ ${entry_price:.2f}")
-        logging.info(f"Stop Loss: {'Present' if has_sl else 'Missing'} (${stop_loss:.2f})")
-        logging.info(f"Take Profit: {'Present' if has_tp else 'Missing'} (${take_profit:.2f})")
+        # Simple and clear logic for SL/TP placement
+        if position_side == 'long':  
+            close_side = 'sell'  # Close long position
+            stop_loss = entry_price * (1 - params['stop_loss_pct'])
+            take_profit = entry_price * (1 + params['take_profit_pct'])
+        elif position_side == 'short':  
+            close_side = 'buy'  # Close short position
+            stop_loss = entry_price * (1 + params['stop_loss_pct'])
+            take_profit = entry_price * (1 - params['take_profit_pct'])
+        
+        logging.info(f"Position Side: {position_side.upper()}")
+        logging.info(f"Close Side: {close_side.upper()}")
+        logging.info(f"Entry Price: ${entry_price:.2f}")
+        logging.info(f"Stop Loss Price: ${stop_loss:.2f}")
+        logging.info(f"Take Profit Price: ${take_profit:.2f}")
+        
+        try:
+            # Place stop loss
+            sl_order = bitget.place_trigger_market_order(
+                symbol=params['symbol'],
+                side=close_side,
+                amount=size,
+                trigger_price=stop_loss,
+                reduce=True
+            )
+            logging.info(f"Stop Loss order placed for {position_side.upper()}: {sl_order['id']} at ${stop_loss:.2f}")
+            
+            # Place take profit
+            tp_order = bitget.place_trigger_market_order(
+                symbol=params['symbol'],
+                side=close_side,
+                amount=size,
+                trigger_price=take_profit,
+                reduce=True
+            )
+            logging.info(f"Take Profit order placed for {position_side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
+            
+        except Exception as e:
+            logging.error(f"Error placing SL/TP orders: {str(e)}")
+            send_telegram_message(f"⚠️ Error placing SL/TP orders: {str(e)}")
     
-    # Now create the message with the entry signals
+    # Create status message with initialized variables
     message = (
         f"=== Momentum Bot Status Update ===\n\n"
-        
         f"Position Status:\n"
         f"Current: {position_info}\n"
         f"Entry Price: {position_entry}\n"
@@ -591,7 +599,7 @@ def trade_logic():
         f"[*] Price Below EMA9: {current_price < ema9}\n"
         f"[*] Volume Acceptable: {volume_ratio > 0.7}\n"
         f"[*] Bearish Pressure: {bid_ask_ratio < 1}\n"
-        f"Final Short Signal: {short_entry}\n\n"
+        f"Final Short Signal: {short_entry}"
     )
 
     # Add trading recommendation
