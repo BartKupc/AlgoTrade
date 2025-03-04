@@ -2,6 +2,7 @@ import ccxt
 import time
 import pandas as pd
 from typing import Any, Optional, Dict, List
+import logging
 
 
 class BitgetFutures():
@@ -312,3 +313,41 @@ class BitgetFutures():
             return self.session.fetch_trades(symbol, limit=limit)
         except Exception as e:
             raise Exception(f"Failed to fetch recent trades for {symbol}: {e}")
+
+    def fetch_positions(self, symbols=None):
+        """Fetch positions for given symbols"""
+        try:
+            if symbols is None:
+                return []
+            
+            positions = []
+            for symbol in symbols:
+                # Get position info using CCXT method
+                position_data = self.session.fetch_positions([symbol])
+                
+                for pos in position_data:
+                    if float(pos.get('contracts', 0)) > 0:  # Only include active positions
+                        position = {
+                            'symbol': symbol,
+                            'side': pos.get('side', '').lower(),  # 'long' or 'short'
+                            'size': float(pos.get('contracts', 0)),
+                            'notional': float(pos.get('notional', 0)),
+                            'leverage': float(pos.get('leverage', 1)),
+                            'entry_price': float(pos.get('entryPrice', 0)),
+                            'unrealized_pnl': float(pos.get('unrealizedPnl', 0)),
+                            'timestamp': int(pos.get('timestamp', 0)),
+                            'info': pos
+                        }
+                        positions.append(position)
+            
+            return positions
+        except Exception as e:
+            logging.error(f"Error fetching positions: {str(e)}")
+            raise
+
+    def _convert_symbol_to_exchange_format(self, symbol):
+        """Convert symbol from standard format to exchange format"""
+        if ':' in symbol:
+            base, quote = symbol.split(':')[0].split('/')
+            return f"{base}{quote}_UMCBL"
+        return symbol

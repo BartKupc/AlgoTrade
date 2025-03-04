@@ -57,12 +57,16 @@ params = {
     'ema_period': 9,
     'ema_threshold': 0.006,
     'stop_loss_pct': 0.01,      # 1% stop loss
-    'take_profit_pct': 0.02,    # Changed from 10% to 2% for more frequent profits
+    'take_profit_pct': 0.02,    # 2% take profit
     'leverage': 3,
-    'max_short_duration': 48,
+    'max_short_duration': 24,
     'short_underwater_threshold': -0.02,
     'strong_momentum_threshold': 0.015,  # 1.5% price move
     'strong_volume_multiplier': 2.0,     # 2x average volume
+    'cooldown_period': 10,      # minutes to wait after a loss
+    'price_trend_bars': 3,      # number of bars to check price trend
+    'min_price_trend': 0.001,   # minimum price trend (0.1%)
+    'require_price_alignment': True,  # price must align with MACD
 }
 
 # Load API keys
@@ -273,6 +277,46 @@ def log_trade(action, side, entry_price, exit_price=None, contracts=None, pnl=No
     trade_details = f"{action},{side},{entry_price},{exit_price},{contracts},{pnl},{duration}"
     trade_logger.info(trade_details)
 
+def check_recent_trades():
+    """Check recent trade history for losses"""
+    try:
+        # Use fetch_positions to get recent position history
+        positions = bitget.fetch_positions([params['symbol']])
+        if not positions:
+            return True
+        
+        # Get the most recent closed position
+        closed_positions = [pos for pos in positions if float(pos['info'].get('holdSide', 0)) == 0]
+        if not closed_positions:
+            return True
+        
+        # Check last position
+        last_position = closed_positions[-1]
+        last_position_time = datetime.fromtimestamp(float(last_position['timestamp']) / 1000)
+        time_since_last_position = (datetime.now() - last_position_time).total_seconds() / 60
+        
+        # If last position was a loss and within cooldown period, don't trade
+        unrealized_pnl = float(last_position['info'].get('unrealisedPnl', 0))
+        if unrealized_pnl < 0 and time_since_last_position < params['cooldown_period']:
+            logging.info(f"In cooldown period after loss. {params['cooldown_period'] - time_since_last_position:.1f} minutes remaining")
+            return False
+            
+        return True
+    except Exception as e:
+        logging.error(f"Error checking recent trades: {str(e)}")
+        # Return True in case of error to allow trading to continue
+        return True
+
+def check_price_trend(data, current_price, direction='long'):
+    """Check if price trend aligns with intended direction"""
+    recent_prices = data['close'].tail(params['price_trend_bars']).values
+    price_change = (current_price - recent_prices[0]) / recent_prices[0]
+    
+    if direction == 'long':
+        return price_change > params['min_price_trend']
+    else:
+        return price_change < -params['min_price_trend']
+
 def trade_logic():
     logging.info("Fetching and processing data...")
     data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct = fetch_data()
@@ -379,9 +423,26 @@ def trade_logic():
     
     # Only proceed with new orders if no position exists
     if not has_position:
+        # Check if we should be trading
+        if not check_recent_trades():
+            return
+        
         # Check entry conditions
         long_standard, long_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
         short_standard, short_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
+        
+        # Additional safety checks
+        if long_standard or long_momentum:
+            price_trending_up = check_price_trend(data, current_price, 'long')
+            if not price_trending_up:
+                logging.info("Skipping long entry: Price not trending up")
+                long_standard = long_momentum = False
+        
+        if short_standard or short_momentum:
+            price_trending_down = check_price_trend(data, current_price, 'short')
+            if not price_trending_down:
+                logging.info("Skipping short entry: Price not trending down")
+                short_standard = short_momentum = False
         
         # Determine if we should enter
         long_entry = long_standard or long_momentum
