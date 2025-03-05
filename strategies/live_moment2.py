@@ -234,12 +234,21 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         )
         
     else:  # short conditions
-        # Standard conditions
-        macd_condition = macd_decreasing  # Only check if MACD is decreasing
-        price_condition = (ema9/current_price - 1) > params['ema_threshold']  # -0.6%
+        # Standard conditions with debug logging
+        macd_condition = macd_decreasing
+        logging.info(f"SHORT - MACD decreasing: {macd_condition}")
+        
+        price_condition = (ema9/current_price - 1) > params['ema_threshold']
+        logging.info(f"SHORT - Price condition: {price_condition} ({(ema9/current_price - 1)*100:.2f}%)")
+        
         volume_condition = volume_acceptable
+        logging.info(f"SHORT - Volume condition: {volume_condition} ({volume_ratio:.2f}x)")
+        
         pressure_condition = ask_volume > bid_volume * 1.2
-        trend_condition = price_trend < -params['min_price_trend']  # -0.1%
+        logging.info(f"SHORT - Pressure condition: {pressure_condition} (ask/bid: {ask_volume/bid_volume:.2f})")
+        
+        trend_condition = price_trend < -params['min_price_trend']
+        logging.info(f"SHORT - Trend condition: {trend_condition} ({price_trend*100:.2f}%)")
         
         standard_conditions = (
             macd_condition and
@@ -248,6 +257,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
             pressure_condition and
             trend_condition
         )
+        logging.info(f"SHORT - Final standard conditions: {standard_conditions}")
         
         # Strong momentum conditions
         momentum_price = price_change_pct < -params['strong_momentum_threshold']  # -1.5%
@@ -478,19 +488,6 @@ def trade_logic():
         if not check_recent_trades():
             logging.info("Skipping trade: In cooldown period after recent loss")
             return
-        
-        # Additional safety checks
-        if long_standard or long_momentum:
-            price_trending_up = check_price_trend(data, current_price, 'long')
-            if not price_trending_up:
-                logging.info("Skipping long entry: Price not trending up")
-                long_standard = long_momentum = False
-        
-        if short_standard or short_momentum:
-            price_trending_down = check_price_trend(data, current_price, 'short')
-            if not price_trending_down:
-                logging.info("Skipping short entry: Price not trending down")
-                short_standard = short_momentum = False
         
         # Determine if we should enter
         long_entry = long_standard or long_momentum
