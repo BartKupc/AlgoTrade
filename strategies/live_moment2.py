@@ -494,11 +494,7 @@ def trade_logic():
         logging.info(f"Can Trade: {can_trade}")
         logging.info(f"Short Standard Conditions: {short_standard}")
         logging.info(f"Short Momentum Conditions: {short_momentum}")
-        
-        # Determine if we should enter
-        short_entry = short_standard or short_momentum
-        logging.info(f"Final Short Entry Signal: {short_entry}")
-        
+              
         if long_entry or short_entry:
             side = 'buy' if long_entry else 'sell'
             is_momentum_entry = long_momentum if long_entry else short_momentum

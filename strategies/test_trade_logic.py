@@ -26,29 +26,16 @@ class MockBitget:
     def fetch_open_positions(self, symbol):
         return self.positions
     
-    def fetch_recent_ohlcv(self, symbol, timeframe, limit):
-        # Create sample declining price data
-        dates = pd.date_range(end=datetime.now(), periods=limit, freq='1H')
-        data = pd.DataFrame({
-            'timestamp': dates,
-            'open': np.linspace(2200, 2170, limit),
-            'high': np.linspace(2205, 2175, limit),
-            'low': np.linspace(2195, 2165, limit),
-            'close': np.linspace(2200, 2170, limit),
-            'volume': np.linspace(1000, 1300, limit)
-        })
-        return data
-    
     def fetch_ticker(self, symbol):
         return {
-            'last': 2160,
-            'quoteVolume': 1500
+            'last': 2150,  # Price below EMA
+            'quoteVolume': 2000  # High volume
         }
     
     def fetch_order_book(self, symbol):
         return {
-            'bids': [[2159, 800]],  # price, volume
-            'asks': [[2161, 1200]]
+            'bids': [[2149, 800]],
+            'asks': [[2151, 1600]]  # More selling pressure
         }
     
     def fetch_balance(self):
@@ -61,67 +48,88 @@ class MockBitget:
         return []
     
     def place_market_order(self, symbol, side, amount):
+        order = {'id': '123', 'side': side, 'amount': amount}
+        self.orders.append(order)
         logging.info(f"Mock placing market order: {side} {amount}")
-        return {'id': '123'}
+        return order
     
     def place_trigger_market_order(self, symbol, side, amount, trigger_price, reduce=False):
+        order = {'id': '124', 'side': side, 'amount': amount, 'trigger_price': trigger_price}
+        self.orders.append(order)
         logging.info(f"Mock placing trigger order: {side} {amount} @ {trigger_price}")
-        return {'id': '124'}
+        return order
 
-def create_favorable_short_data():
-    # Create sample data that matches real conditions
+def create_bearish_market_data():
+    """Create sample data with strong bearish signals"""
     data = pd.DataFrame({
         'timestamp': pd.date_range(end=datetime.now(), periods=10, freq='1H'),
-        'open': [2200, 2195, 2190, 2185, 2180, 2175, 2170, 2165, 2160, 2155],
-        'high': [2205, 2200, 2195, 2190, 2185, 2180, 2175, 2170, 2165, 2160],
-        'low': [2195, 2190, 2185, 2180, 2175, 2170, 2165, 2160, 2155, 2150],
-        'close': [2200, 2195, 2190, 2185, 2180, 2175, 2170, 2165, 2160, 2155],
-        'volume': [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900],
-        'macd': [14, 12, 10, 8, 6, 4, 2, 0, -2, -4],
-        'macd_signal': [13, 12, 11, 10, 9, 8, 7, 6, 5, 4],
-        'ema9': [2210, 2205, 2200, 2195, 2190, 2185, 2180, 2175, 2170, 2165]
+        'open': [2200, 2190, 2180, 2170, 2160, 2150, 2140, 2130, 2120, 2110],
+        'high': [2205, 2195, 2185, 2175, 2165, 2155, 2145, 2135, 2125, 2115],
+        'low': [2195, 2185, 2175, 2165, 2155, 2145, 2135, 2125, 2115, 2105],
+        'close': [2190, 2180, 2170, 2160, 2150, 2140, 2130, 2120, 2110, 2100],
+        'volume': [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800],
+        'macd': [5, 4, 3, 2, 1, 0, -1, -2, -3, -4],
+        'macd_signal': [4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0, -0.5],
+        'ema9': [2200, 2190, 2180, 2170, 2160, 2150, 2140, 2130, 2120, 2110]
     })
     return data
 
-def test_trade_execution():
-    logging.info("=== Starting Trade Logic Test ===")
+def test_short_entry():
+    logging.info("\n=== Starting Short Entry Test ===")
     
-    # Create mock exchange with more realistic data
+    # Setup mock exchange
     mock_bitget = MockBitget()
     
-    # Create favorable conditions that match real market
-    data = create_favorable_short_data()
-    current_price = 2150  # Price below EMA
-    current_volume = 2000  # Higher volume
+    # Create bearish market conditions
+    data = create_bearish_market_data()
+    current_price = 2100  # Significantly below EMA
+    current_volume = 2800  # Increasing volume
     bid_volume = 800
-    ask_volume = 1600    # More asks than bids (bearish)
+    ask_volume = 1600    # More selling pressure
     price_momentum = "down"
     price_change_pct = -0.02  # 2% down
     
-    # Test entry conditions first
+    # Test entry conditions
+    logging.info("\n=== Testing Entry Conditions ===")
     short_standard, short_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
         data, current_price, current_volume, bid_volume, ask_volume, 
         price_momentum, price_change_pct, 'short'
     )
     
-    logging.info("\n=== Entry Conditions Test Results ===")
     logging.info(f"Short Standard: {short_standard}")
     logging.info(f"Short Momentum: {short_momentum}")
     logging.info(f"Price Trend: {price_trend}")
     logging.info(f"MACD Decreasing: {macd_decreasing}")
     
-    # Now test full trade logic
-    logging.info("\n=== Testing Full Trade Logic ===")
-    trade_result = trade_logic()
+    # Test trade execution
+    logging.info("\n=== Testing Trade Execution ===")
+    orders_before = len(mock_bitget.orders)
     
-    logging.info("\n=== Trade Logic Test Complete ===")
-    return short_standard, short_momentum, trade_result
+    # Run trade logic
+    from strategies.live_moment2 import trade_logic
+    trade_logic()
+    
+    orders_after = len(mock_bitget.orders)
+    orders_placed = orders_after - orders_before
+    
+    logging.info(f"\nOrders placed: {orders_placed}")
+    if orders_placed > 0:
+        logging.info("Trade execution successful!")
+        for order in mock_bitget.orders[orders_before:]:
+            logging.info(f"Order: {order}")
+    else:
+        logging.info("No orders placed")
+    
+    return {
+        'short_standard': short_standard,
+        'short_momentum': short_momentum,
+        'orders_placed': orders_placed,
+        'price_trend': price_trend,
+        'macd_decreasing': macd_decreasing
+    }
 
 if __name__ == "__main__":
-    print("Starting Trade Logic Test...")
-    short_standard, short_momentum, trade_result = test_trade_execution()
-    
+    results = test_short_entry()
     print("\nTest Results:")
-    print(f"Short Standard Signal: {short_standard}")
-    print(f"Short Momentum Signal: {short_momentum}")
-    print(f"Trade Result: {trade_result}") 
+    for key, value in results.items():
+        print(f"{key}: {value}") 
