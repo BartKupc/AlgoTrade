@@ -201,60 +201,64 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
             continue
     
     if len(recent_prices) >= 3:  # Need at least 3 price points
-        # Calculate weighted price changes (more recent = higher weight)
+        # Calculate weighted price changes
         price_changes = []
         weights = []
         for i in range(len(recent_prices)-1):
             change = (recent_prices[i+1] - recent_prices[i]) / recent_prices[i]
-            # Exponential weight decay (more recent changes matter more)
-            weight = 0.85 ** i  # 0.85^0 = 1, 0.85^1 = 0.85, 0.85^2 = 0.72, etc.
+            weight = 0.85 ** i
             price_changes.append(change)
             weights.append(weight)
         
-        # Calculate weighted average price change
         weighted_price_change = sum(c * w for c, w in zip(price_changes, weights)) / sum(weights)
-        
         logging.info(f"Weighted price change (last 15min): {weighted_price_change*100:.2f}%")
         logging.info(f"Recent price changes: {[f'{c*100:.2f}%' for c in price_changes]}")
     else:
         weighted_price_change = price_change_pct
     
-    # Volume analysis with time weighting
+    # Volume analysis
     avg_hourly_volume = data['volume'].tail(4).mean()
     avg_minute_volume = avg_hourly_volume / 60
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
+    # Define standard conditions for both long and short
     if direction == 'long':
-        # Strong momentum override for longs with time weighting
+        standard_conditions = (
+            macd > macd_signal and                # MACD above signal
+            current_price > ema9 and              # Price above EMA
+            volume_acceptable and                 # Good volume
+            bid_volume > ask_volume              # More buying pressure
+        )
+        
+        # Strong momentum override for longs
         strong_momentum = (
-            weighted_price_change > params['strong_momentum_threshold'] and  # Sustained price move up
-            price_change_pct > params['strong_momentum_threshold'] * 0.7 and # Current move still significant
-            volume_ratio > params['strong_volume_multiplier'] and           # High volume
-            bid_volume > ask_volume * 1.5 and                              # Strong buying pressure
-            current_price > ema9 and                                       # Above EMA
-            macd > macd_signal and                                         # MACD positive
-            all(p > ema9 for p in recent_prices[-5:])                      # Price stayed above EMA
+            weighted_price_change > params['strong_momentum_threshold'] and
+            price_change_pct > params['strong_momentum_threshold'] * 0.7 and
+            volume_ratio > params['strong_volume_multiplier'] and
+            bid_volume > ask_volume * 1.5 and
+            current_price > ema9 and
+            macd > macd_signal and
+            all(p > ema9 for p in recent_prices[-5:])
         )
     else:  # short
-        # Strong momentum override for shorts with time weighting
-        strong_momentum = (
-            weighted_price_change < -params['strong_momentum_threshold'] and # Sustained price move down
-            price_change_pct < -params['strong_momentum_threshold'] * 0.7 and # Current move still significant
-            volume_ratio > params['strong_volume_multiplier'] and            # High volume
-            ask_volume > bid_volume * 1.5 and                               # Strong selling pressure
-            current_price < ema9 and                                        # Below EMA
-            macd < macd_signal and                                          # MACD negative
-            all(p < ema9 for p in recent_prices[-5:])                       # Price stayed below EMA
+        standard_conditions = (
+            macd < macd_signal and                # MACD below signal
+            current_price < ema9 and              # Price below EMA
+            volume_acceptable and                 # Good volume
+            ask_volume > bid_volume              # More selling pressure
         )
-
-    if strong_momentum:
-        logging.info("\n=== Strong Momentum Analysis ===")
-        logging.info(f"Weighted Price Change: {weighted_price_change*100:.2f}%")
-        logging.info(f"Current Price Change: {price_change_pct*100:.2f}%")
-        logging.info(f"Volume Ratio: {volume_ratio:.2f}x")
-        logging.info(f"Price/EMA Consistency: {'All Above' if direction=='long' else 'All Below'} EMA")
-        logging.info(f"MACD Alignment: {'Positive' if macd > macd_signal else 'Negative'}")
+        
+        # Strong momentum override for shorts
+        strong_momentum = (
+            weighted_price_change < -params['strong_momentum_threshold'] and
+            price_change_pct < -params['strong_momentum_threshold'] * 0.7 and
+            volume_ratio > params['strong_volume_multiplier'] and
+            ask_volume > bid_volume * 1.5 and
+            current_price < ema9 and
+            macd < macd_signal and
+            all(p < ema9 for p in recent_prices[-5:])
+        )
 
     return standard_conditions, strong_momentum
 
@@ -490,20 +494,17 @@ def trade_logic():
                 logging.warning("Failed to calculate position size")
                 return
             
-            logging.info(f"\n=== Placing New {side.upper()} Order ===")
-            logging.info(f"Amount: {quantity} contracts")
-            
             try:
-                # Use market order for momentum entries, limit order for standard entries
+                # Place entry order
                 if is_momentum_entry:
                     entry_order = bitget.place_market_order(
                         symbol=params['symbol'],
                         side=side,
                         amount=quantity
                     )
-                    entry_price = current_price  # Use current price for market orders
+                    entry_price = current_price
                 else:
-                    entry_price = current_price * (1.001 if long_entry else 0.999)
+                    entry_price = current_price * (1.001 if side == 'buy' else 0.999)
                     entry_order = bitget.place_limit_order(
                         symbol=params['symbol'],
                         side=side,
@@ -511,54 +512,51 @@ def trade_logic():
                         price=entry_price
                     )
                 
-                logging.info(f"Entry order placed: {entry_order['id']} at ${entry_price:.2f}")
+                logging.info(f"\n=== Entry Order Placed ===")
+                logging.info(f"Side: {side.upper()}")
+                logging.info(f"Entry Price: ${entry_price:.2f}")
+                logging.info(f"Quantity: {quantity}")
                 
-                # Calculate SL/TP levels based on entry direction
-                if side == 'buy':  # Long position
-                    stop_loss = entry_price * (1 - params['stop_loss_pct'])    # Below entry
-                    take_profit = entry_price * (1 + params['take_profit_pct']) # Above entry
-                    close_side = 'sell'  # Close long position with sell
-                    trigger_type = 'down'  # Trigger when price goes down for long SL
-                else:  # Short position
-                    stop_loss = entry_price * (1 + params['stop_loss_pct'])    # Above entry
-                    take_profit = entry_price * (1 - params['take_profit_pct']) # Below entry
-                    close_side = 'buy'   # Close short position with buy
-                    trigger_type = 'up'  # Trigger when price goes up for short SL
+                # Simple SL/TP logic
+                if side == 'buy':  # LONG position
+                    stop_loss = entry_price * (1 - params['stop_loss_pct'])
+                    take_profit = entry_price * (1 + params['take_profit_pct'])
+                    close_side = 'sell'
+                else:  # SHORT position
+                    stop_loss = entry_price * (1 + params['stop_loss_pct'])
+                    take_profit = entry_price * (1 - params['take_profit_pct'])
+                    close_side = 'buy'
                 
-                # Place SL order with correct trigger direction
+                # Place Stop Loss - using quantity instead of size
                 sl_order = bitget.place_trigger_market_order(
                     symbol=params['symbol'],
-                    side=close_side,  # Use the correct closing side
-                    amount=quantity,
+                    side=close_side,
+                    amount=quantity,  # Changed from size to quantity
                     trigger_price=stop_loss,
-                    trigger_type=trigger_type,  # Add trigger direction
                     reduce=True
                 )
-                logging.info(f"Stop Loss order placed for {side.upper()}: {sl_order['id']} at ${stop_loss:.2f} (trigger {trigger_type})")
                 
-                # Place TP order
+                # Place Take Profit - using quantity instead of size
                 tp_order = bitget.place_trigger_market_order(
                     symbol=params['symbol'],
-                    side=close_side,  # Use the correct closing side
-                    amount=quantity,
+                    side=close_side,
+                    amount=quantity,  # Changed from size to quantity
                     trigger_price=take_profit,
-                    trigger_type='up' if side == 'buy' else 'down',  # TP trigger opposite to SL
                     reduce=True
                 )
-                logging.info(f"Take Profit order placed for {side.upper()}: {tp_order['id']} at ${take_profit:.2f}")
                 
-                # Log the opened trade
-                log_trade(
-                    action="OPEN",
-                    side=side,
-                    entry_price=entry_price,
-                    contracts=quantity,
-                    exit_price=None,
-                    pnl=None,
-                    duration=None
-                )
+                # Log orders
+                logging.info(f"\n=== Stop Loss Order ===")
+                logging.info(f"Type: {'LONG' if side == 'buy' else 'SHORT'} Stop Loss")
+                logging.info(f"Close Side: {close_side.upper()}")
+                logging.info(f"Trigger Price: ${stop_loss:.2f}")
                 
-                # Send detailed Telegram message
+                logging.info(f"\n=== Take Profit Order ===")
+                logging.info(f"Type: {'LONG' if side == 'buy' else 'SHORT'} Take Profit")
+                logging.info(f"Close Side: {close_side.upper()}")
+                logging.info(f"Trigger Price: ${take_profit:.2f}")
+                
+                # Send Telegram message
                 entry_message = (
                     f"🚨 NEW {side.upper()} POSITION OPENED 🚨\n"
                     f"Entry Type: {'Strong Momentum' if is_momentum_entry else 'Standard Entry'}\n"
@@ -568,7 +566,7 @@ def trade_logic():
                     f"Take Profit: ${take_profit:.2f} ({'+' if side == 'buy' else '-'}{params['take_profit_pct']*100}%)"
                 )
                 send_telegram_message(entry_message)
-                
+
             except Exception as e:
                 logging.error(f"Error placing orders: {str(e)}")
                 send_telegram_message(f"⚠️ Error placing orders: {str(e)}")
