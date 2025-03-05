@@ -190,24 +190,24 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
-    # Check MACD trend over last 3 bars
-    macd_diffs = [
-        last_row['macd'] - last_row['macd_signal'],
-        prev_row['macd'] - prev_row['macd_signal'],
-        prev2_row['macd'] - prev2_row['macd_signal']
+    # Check MACD trend over last 3 bars - only check if it's increasing/decreasing
+    macd_values = [
+        last_row['macd'],
+        prev_row['macd'],
+        prev2_row['macd']
     ]
-    macd_increasing = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
-    macd_decreasing = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
+    macd_increasing = all(macd_values[i] > macd_values[i+1] for i in range(2))
+    macd_decreasing = all(macd_values[i] < macd_values[i+1] for i in range(2))
 
     # Check price trend over last 3 bars
     price_trend = (current_price - data['close'].iloc[-3]) / data['close'].iloc[-3]
 
     if direction == 'long':
         # Standard conditions
-        macd_condition = macd > macd_signal and macd_increasing
+        macd_condition = macd_increasing  # Only check if MACD is increasing
         price_condition = (current_price/ema9 - 1) > params['ema_threshold']  # 0.6%
         volume_condition = volume_acceptable
-        pressure_condition = bid_volume > ask_volume * 1.2  # Changed to 1.2x
+        pressure_condition = bid_volume > ask_volume * 1.2
         trend_condition = price_trend > params['min_price_trend']  # 0.1%
         
         standard_conditions = (
@@ -223,7 +223,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
         momentum_pressure = bid_volume > ask_volume * 1.5
         momentum_price_level = current_price > ema9
-        momentum_macd = macd > macd_signal
+        momentum_macd = macd_increasing  # Changed to only check direction
         
         strong_momentum = (
             momentum_price and
@@ -235,10 +235,10 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         
     else:  # short conditions
         # Standard conditions
-        macd_condition = macd < macd_signal and macd_decreasing
+        macd_condition = macd_decreasing  # Only check if MACD is decreasing
         price_condition = (ema9/current_price - 1) > params['ema_threshold']  # -0.6%
         volume_condition = volume_acceptable
-        pressure_condition = ask_volume > bid_volume * 1.2  # Changed to 1.2x
+        pressure_condition = ask_volume > bid_volume * 1.2
         trend_condition = price_trend < -params['min_price_trend']  # -0.1%
         
         standard_conditions = (
@@ -254,7 +254,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
         momentum_pressure = ask_volume > bid_volume * 1.5
         momentum_price_level = current_price < ema9
-        momentum_macd = macd < macd_signal
+        momentum_macd = macd_decreasing  # Changed to only check direction
         
         strong_momentum = (
             momentum_price and
@@ -264,7 +264,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
             momentum_macd
         )
 
-    return standard_conditions, strong_momentum, price_trend, macd_diffs, macd_increasing, macd_decreasing
+    return standard_conditions, strong_momentum, price_trend, macd_values, macd_increasing, macd_decreasing
 
 def check_exit_conditions(data, current_price, position_side):
     """Check exit conditions using 1h OHLC and current price"""
@@ -367,7 +367,7 @@ def trade_logic():
     can_trade = check_recent_trades()
     
     # Check entry conditions
-    long_standard, long_momentum, price_trend, macd_diffs, macd_increasing, macd_decreasing = check_entry_conditions(
+    long_standard, long_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
         data, current_price, current_volume, bid_volume, ask_volume, 
         price_momentum, price_change_pct, 'long'
     )
@@ -424,15 +424,15 @@ def trade_logic():
     logging.info(f"Volume Change: {volume_change:.2f}% ({'Increasing' if volume_change > 0 else 'Decreasing'} momentum)")
     
     # MACD trend analysis
-    macd_diffs = [
+    macd_values = [
         macd - macd_signal,
         data.iloc[-2]['macd'] - data.iloc[-2]['macd_signal'],
         data.iloc[-3]['macd'] - data.iloc[-3]['macd_signal']
     ]
     
     # Check if MACD differences are increasing/decreasing
-    macd_increasing = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
-    macd_decreasing = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
+    macd_increasing = all(macd_values[i] > macd_values[i+1] for i in range(2))
+    macd_decreasing = all(macd_values[i] < macd_values[i+1] for i in range(2))
     
     # Determine MACD trend status
     if macd_increasing:
@@ -450,9 +450,9 @@ def trade_logic():
 
     # Log MACD analysis
     logging.info("\n=== MACD Analysis ===")
-    logging.info(f"Current MACD-Signal: {macd_diffs[0]:.6f}")
-    logging.info(f"Previous MACD-Signal: {macd_diffs[1]:.6f}")
-    logging.info(f"2 Candles Ago MACD-Signal: {macd_diffs[2]:.6f}")
+    logging.info(f"Current MACD-Signal: {macd_values[0]:.6f}")
+    logging.info(f"Previous MACD-Signal: {macd_values[1]:.6f}")
+    logging.info(f"2 Candles Ago MACD-Signal: {macd_values[2]:.6f}")
     logging.info(f"MACD Trend: {macd_trend}")
     logging.info(f"MACD Status: {macd_status}")
     
@@ -721,9 +721,9 @@ def trade_logic():
         f"LONG Entry Conditions:\n"
         f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
         f"[*] MACD Momentum: {'✅' if macd_increasing else '❌'} (needs 3 increasing bars)\n"
-        f"   • Current diff: {macd_diffs[0]:.6f}\n"
-        f"   • Previous diff: {macd_diffs[1]:.6f}\n"
-        f"   • 2 bars ago: {macd_diffs[2]:.6f}\n"
+        f"   • Current diff: {macd_values[0]:.6f}\n"
+        f"   • Previous diff: {macd_values[1]:.6f}\n"
+        f"   • 2 bars ago: {macd_values[2]:.6f}\n"
         f"[*] Price/EMA9 Threshold: {'✅' if (current_price/ema9 - 1) > 0.006 else '❌'} ({(current_price/ema9 - 1)*100:.2f}% vs 0.6%)\n"
         f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
         f"[*] Strong Bullish Pressure: {'✅' if bid_ask_ratio > 1.2 else '❌'} ({bid_ask_ratio:.2f})\n"
@@ -733,9 +733,9 @@ def trade_logic():
         f"SHORT Conditions:\n"
         f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
         f"[*] MACD Momentum: {'✅' if macd_decreasing else '❌'} (needs 3 decreasing bars)\n"
-        f"   • Current diff: {macd_diffs[0]:.6f}\n"
-        f"   • Previous diff: {macd_diffs[1]:.6f}\n"
-        f"   • 2 bars ago: {macd_diffs[2]:.6f}\n"
+        f"   • Current diff: {macd_values[0]:.6f}\n"
+        f"   • Previous diff: {macd_values[1]:.6f}\n"
+        f"   • 2 bars ago: {macd_values[2]:.6f}\n"
         f"[*] Price/EMA9 Threshold: {'✅' if (ema9/current_price - 1) > 0.006 else '❌'} ({(ema9/current_price - 1)*100:.2f}% vs 0.6%)\n"
         f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
         f"[*] Strong Bearish Pressure: {'✅' if bid_ask_ratio < 0.8 else '❌'} ({bid_ask_ratio:.2f})\n"
