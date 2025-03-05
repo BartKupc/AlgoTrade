@@ -375,22 +375,27 @@ def trade_logic():
     
     # Check cooldown period
     can_trade = check_recent_trades()
+    logging.info(f"Can trade status: {can_trade}")
     
     # Check entry conditions
     long_standard, long_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
         data, current_price, current_volume, bid_volume, ask_volume, 
         price_momentum, price_change_pct, 'long'
     )
-    short_standard, short_momentum, _, _, _, _ = check_entry_conditions(
+    short_standard, short_momentum, short_price_trend, short_macd_values, short_macd_increasing, short_macd_decreasing = check_entry_conditions(
         data, current_price, current_volume, bid_volume, ask_volume, 
         price_momentum, price_change_pct, 'short'
     )
     
     # Add cooldown check to entry signals
+    logging.info(f"Before applying can_trade - Short standard: {short_standard}, Short momentum: {short_momentum}")
+    
     long_standard = long_standard and can_trade
     long_momentum = long_momentum and can_trade
     short_standard = short_standard and can_trade
     short_momentum = short_momentum and can_trade
+    
+    logging.info(f"After applying can_trade - Short standard: {short_standard}, Short momentum: {short_momentum}")
     
     # If no position is open, cancel all trigger orders
     if not has_position:
@@ -482,16 +487,35 @@ def trade_logic():
     long_momentum = False
     short_momentum = False
     
-    # Only proceed with new orders if no position exists
+    # Add debug log right after entry conditions check
+    logging.info(f"\n=== Entry Signals After Initial Check ===")
+    logging.info(f"Short Standard: {short_standard}")
+    logging.info(f"Short Momentum: {short_momentum}")
+    
+    # After can_trade check
+    logging.info(f"\n=== Entry Signals After Can Trade Check ===")
+    logging.info(f"Can Trade: {can_trade}")
+    logging.info(f"Short Standard: {short_standard}")
+    logging.info(f"Short Momentum: {short_momentum}")
+    
+    # Right before trade execution
     if not has_position:
-        # Check if we should be trading (MOVED THIS CHECK BEFORE ANY ENTRY LOGIC)
+        # Check if we should be trading
         if not check_recent_trades():
             logging.info("Skipping trade: In cooldown period after recent loss")
             return
         
+        logging.info(f"\n=== Final Trade Decision ===")
+        logging.info(f"Has Position: {has_position}")
+        logging.info(f"Short Entry: {short_entry}")
+        logging.info(f"Short Standard: {short_standard}")
+        logging.info(f"Short Momentum: {short_momentum}")
         # Determine if we should enter
         long_entry = long_standard or long_momentum
         short_entry = short_standard or short_momentum
+        
+        # Add debug log
+        logging.info(f"Final entry signals - Short standard: {short_standard}, Short momentum: {short_momentum}, Short entry: {short_entry}")
         
         if long_entry or short_entry:
             side = 'buy' if long_entry else 'sell'
