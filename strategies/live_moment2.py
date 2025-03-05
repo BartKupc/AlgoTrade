@@ -695,11 +695,6 @@ def trade_logic():
     
     # Create status message with initialized variables
     message = (
-        f"=== Momentum Bot Status Update ===\n\n"
-        f"Position Status:\n"
-        f"Current: {position_info}\n"
-        f"Entry Price: {position_entry}\n"
-        f"Unrealized PnL: {position_pnl}\n\n"
         
         f"Market Analysis:\n"
         f"Current Price: ${current_price:.2f}\n"
@@ -744,6 +739,12 @@ def trade_logic():
         f"Short Standard Conditions: {'✅' if short_standard else '❌'}\n"
         f"Short Momentum Conditions: {'✅' if short_momentum else '❌'}\n"
         f"Final Short Signal: {'✅' if short_entry else '❌'}\n"
+
+        f"=== Momentum Bot Status Update ===\n\n"
+        f"Position Status:\n"
+        f"Current: {position_info}\n"
+        f"Entry Price: {position_entry}\n"
+        f"Unrealized PnL: {position_pnl}\n\n"
     )
 
     # Add pending orders if any
