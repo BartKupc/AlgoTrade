@@ -737,20 +737,8 @@ def trade_logic():
         f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
         f"[*] Strong Bearish Pressure: {'✅' if bid_ask_ratio < 0.8 else '❌'} ({bid_ask_ratio:.2f})\n"
         f"[*] Price Trend (3 bars): {'✅' if price_trend < -0.001 else '❌'} ({price_trend*100:.2f}% vs -0.1%)\n"
-        f"Final Short Signal: {'✅' if short_entry else '❌'}"
+        f"Final Short Signal: {'✅' if short_entry else '❌'}\n"
     )
-
-    # Add trading recommendation
-    if long_entry:
-        message += ">> STRONG LONG OPPORTUNITY - All conditions met"
-    elif short_entry:
-        message += ">> STRONG SHORT OPPORTUNITY - All conditions met"
-    else:
-        message += ">> WAIT - Conditions not optimal for entry\n"
-        if macd > macd_signal:
-            message += "Watching for long setup (MACD bullish but other conditions not met)"
-        else:
-            message += "Watching for short setup (MACD bearish but other conditions not met)"
 
     # Add pending orders if any
     open_orders = bitget.fetch_open_orders(params['symbol'])
@@ -769,7 +757,6 @@ def trade_logic():
     # Update Telegram message to include volume analysis
     message += (
         f"Volume Analysis:\n"
-        f"Current vs Avg: {volume_ratio:.2f}x\n"
         f"Order Book Pressure: {'Buying' if bid_volume > ask_volume else 'Selling'}\n"
         f"Bid/Ask Ratio: {(bid_volume/ask_volume):.2f}\n\n"
     )
