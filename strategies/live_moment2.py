@@ -181,7 +181,6 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
     """Check entry conditions with time-weighted momentum override"""
     last_row = data.iloc[-1]
     prev_row = data.iloc[-2]
-    prev2_row = data.iloc[-3]
     macd, macd_signal, ema9 = last_row[['macd', 'macd_signal', 'ema9']]
     
     # Volume analysis
@@ -190,25 +189,24 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
-    # Check MACD trend over last 3 bars - only check if it's increasing/decreasing
+    # Check MACD trend - only check current bar vs previous
     macd_values = [
-        last_row['macd'],
-        prev_row['macd'],
-        prev2_row['macd']
+        last_row['macd'] - last_row['macd_signal'],
+        prev_row['macd'] - prev_row['macd_signal']
     ]
-    macd_increasing = all(macd_values[i] > macd_values[i+1] for i in range(2))
-    macd_decreasing = all(macd_values[i] < macd_values[i+1] for i in range(2))
+    macd_increasing = macd_values[0] > macd_values[1]  # Current higher than previous
+    macd_decreasing = macd_values[0] < macd_values[1]  # Current lower than previous
 
     # Check price trend over last 3 bars
     price_trend = (current_price - data['close'].iloc[-3]) / data['close'].iloc[-3]
 
     if direction == 'long':
         # Standard conditions
-        macd_condition = macd_increasing  # Only check if MACD is increasing
-        price_condition = (current_price/ema9 - 1) > params['ema_threshold']  # 0.6%
+        macd_condition = macd_increasing  # Only check if current MACD is increasing
+        price_condition = (current_price/ema9 - 1) > params['ema_threshold']
         volume_condition = volume_acceptable
         pressure_condition = bid_volume > ask_volume * 1.2
-        trend_condition = price_trend > params['min_price_trend']  # 0.1%
+        trend_condition = price_trend > params['min_price_trend']
         
         standard_conditions = (
             macd_condition and
@@ -219,11 +217,11 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         )
         
         # Strong momentum conditions
-        momentum_price = price_change_pct > params['strong_momentum_threshold']  # 1.5%
-        momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
+        momentum_price = price_change_pct > params['strong_momentum_threshold']
+        momentum_volume = volume_ratio > params['strong_volume_multiplier']
         momentum_pressure = bid_volume > ask_volume * 1.5
         momentum_price_level = current_price > ema9
-        momentum_macd = macd_increasing  # Changed to only check direction
+        momentum_macd = macd_increasing
         
         strong_momentum = (
             momentum_price and
@@ -235,7 +233,7 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         
     else:  # short conditions
         # Standard conditions with debug logging
-        macd_condition = macd_decreasing
+        macd_condition = macd_decreasing  # Only check if current MACD is decreasing
         logging.info(f"SHORT - MACD decreasing: {macd_condition}")
         
         price_condition = (ema9/current_price - 1) > params['ema_threshold']
@@ -260,11 +258,11 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
         logging.info(f"SHORT - Final standard conditions: {standard_conditions}")
         
         # Strong momentum conditions
-        momentum_price = price_change_pct < -params['strong_momentum_threshold']  # -1.5%
-        momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
+        momentum_price = price_change_pct < -params['strong_momentum_threshold']
+        momentum_volume = volume_ratio > params['strong_volume_multiplier']
         momentum_pressure = ask_volume > bid_volume * 1.5
         momentum_price_level = current_price < ema9
-        momentum_macd = macd_decreasing  # Changed to only check direction
+        momentum_macd = macd_decreasing
         
         strong_momentum = (
             momentum_price and
@@ -353,7 +351,7 @@ def check_price_trend(data, current_price, direction='long'):
     """Check if price trend aligns with intended direction"""
     recent_prices = data['close'].tail(params['price_trend_bars']).values
     price_change = (current_price - recent_prices[0]) / recent_prices[0]
-    
+
     if direction == 'long':
         return price_change > params['min_price_trend']
     else:
