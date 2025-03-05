@@ -180,41 +180,9 @@ def calculate_position_size(close_price):
 def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, direction='long'):
     """Check entry conditions with time-weighted momentum override"""
     last_row = data.iloc[-1]
+    prev_row = data.iloc[-2]
+    prev2_row = data.iloc[-3]
     macd, macd_signal, ema9 = last_row[['macd', 'macd_signal', 'ema9']]
-    
-    # Get previous MACD differences
-    macd_diffs = [
-        macd - macd_signal,
-        data.iloc[-2]['macd'] - data.iloc[-2]['macd_signal'],
-        data.iloc[-3]['macd'] - data.iloc[-3]['macd_signal']
-    ]
-    
-    # Time-weighted price change analysis (last 15 minutes)
-    recent_prices = []
-    for i in range(15):  # Check last 15 minutes
-        try:
-            minute_price = bitget.fetch_ticker(params['symbol'])['last']
-            recent_prices.append(minute_price)
-            time.sleep(0.2)  # Small delay to avoid API rate limits
-        except Exception as e:
-            logging.error(f"Error fetching minute price: {str(e)}")
-            continue
-    
-    if len(recent_prices) >= 3:  # Need at least 3 price points
-        # Calculate weighted price changes
-        price_changes = []
-        weights = []
-        for i in range(len(recent_prices)-1):
-            change = (recent_prices[i+1] - recent_prices[i]) / recent_prices[i]
-            weight = 0.85 ** i
-            price_changes.append(change)
-            weights.append(weight)
-        
-        weighted_price_change = sum(c * w for c, w in zip(price_changes, weights)) / sum(weights)
-        logging.info(f"Weighted price change (last 15min): {weighted_price_change*100:.2f}%")
-        logging.info(f"Recent price changes: {[f'{c*100:.2f}%' for c in price_changes]}")
-    else:
-        weighted_price_change = price_change_pct
     
     # Volume analysis
     avg_hourly_volume = data['volume'].tail(4).mean()
@@ -222,45 +190,81 @@ def check_entry_conditions(data, current_price, current_volume, bid_volume, ask_
     volume_ratio = current_volume / avg_minute_volume
     volume_acceptable = volume_ratio > 0.7
 
-    # Define standard conditions for both long and short
+    # Check MACD trend over last 3 bars
+    macd_diffs = [
+        last_row['macd'] - last_row['macd_signal'],
+        prev_row['macd'] - prev_row['macd_signal'],
+        prev2_row['macd'] - prev2_row['macd_signal']
+    ]
+    macd_increasing = all(macd_diffs[i] > macd_diffs[i+1] for i in range(2))
+    macd_decreasing = all(macd_diffs[i] < macd_diffs[i+1] for i in range(2))
+
+    # Check price trend over last 3 bars
+    price_trend = (current_price - data['close'].iloc[-3]) / data['close'].iloc[-3]
+
     if direction == 'long':
+        # Standard conditions
+        macd_condition = macd > macd_signal and macd_increasing
+        price_condition = (current_price/ema9 - 1) > params['ema_threshold']  # 0.6%
+        volume_condition = volume_acceptable
+        pressure_condition = bid_volume > ask_volume * 1.2  # Changed to 1.2x
+        trend_condition = price_trend > params['min_price_trend']  # 0.1%
+        
         standard_conditions = (
-            macd > macd_signal and                # MACD above signal
-            current_price > ema9 and              # Price above EMA
-            volume_acceptable and                 # Good volume
-            bid_volume > ask_volume              # More buying pressure
+            macd_condition and
+            price_condition and
+            volume_condition and
+            pressure_condition and
+            trend_condition
         )
         
-        # Strong momentum override for longs
+        # Strong momentum conditions
+        momentum_price = price_change_pct > params['strong_momentum_threshold']  # 1.5%
+        momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
+        momentum_pressure = bid_volume > ask_volume * 1.5
+        momentum_price_level = current_price > ema9
+        momentum_macd = macd > macd_signal
+        
         strong_momentum = (
-            weighted_price_change > params['strong_momentum_threshold'] and
-            price_change_pct > params['strong_momentum_threshold'] * 0.7 and
-            volume_ratio > params['strong_volume_multiplier'] and
-            bid_volume > ask_volume * 1.5 and
-            current_price > ema9 and
-            macd > macd_signal and
-            all(p > ema9 for p in recent_prices[-5:])
-        )
-    else:  # short
-        standard_conditions = (
-            macd < macd_signal and                # MACD below signal
-            current_price < ema9 and              # Price below EMA
-            volume_acceptable and                 # Good volume
-            ask_volume > bid_volume              # More selling pressure
+            momentum_price and
+            momentum_volume and
+            momentum_pressure and
+            momentum_price_level and
+            momentum_macd
         )
         
-        # Strong momentum override for shorts
+    else:  # short conditions
+        # Standard conditions
+        macd_condition = macd < macd_signal and macd_decreasing
+        price_condition = (ema9/current_price - 1) > params['ema_threshold']  # -0.6%
+        volume_condition = volume_acceptable
+        pressure_condition = ask_volume > bid_volume * 1.2  # Changed to 1.2x
+        trend_condition = price_trend < -params['min_price_trend']  # -0.1%
+        
+        standard_conditions = (
+            macd_condition and
+            price_condition and
+            volume_condition and
+            pressure_condition and
+            trend_condition
+        )
+        
+        # Strong momentum conditions
+        momentum_price = price_change_pct < -params['strong_momentum_threshold']  # -1.5%
+        momentum_volume = volume_ratio > params['strong_volume_multiplier']  # 2x
+        momentum_pressure = ask_volume > bid_volume * 1.5
+        momentum_price_level = current_price < ema9
+        momentum_macd = macd < macd_signal
+        
         strong_momentum = (
-            weighted_price_change < -params['strong_momentum_threshold'] and
-            price_change_pct < -params['strong_momentum_threshold'] * 0.7 and
-            volume_ratio > params['strong_volume_multiplier'] and
-            ask_volume > bid_volume * 1.5 and
-            current_price < ema9 and
-            macd < macd_signal and
-            all(p < ema9 for p in recent_prices[-5:])
+            momentum_price and
+            momentum_volume and
+            momentum_pressure and
+            momentum_price_level and
+            momentum_macd
         )
 
-    return standard_conditions, strong_momentum
+    return standard_conditions, strong_momentum, price_trend, macd_diffs, macd_increasing, macd_decreasing
 
 def check_exit_conditions(data, current_price, position_side):
     """Check exit conditions using 1h OHLC and current price"""
@@ -359,6 +363,25 @@ def trade_logic():
     position = bitget.fetch_open_positions(params['symbol'])
     has_position = len(position) > 0
     
+    # Check cooldown period
+    can_trade = check_recent_trades()
+    
+    # Check entry conditions
+    long_standard, long_momentum, price_trend, macd_diffs, macd_increasing, macd_decreasing = check_entry_conditions(
+        data, current_price, current_volume, bid_volume, ask_volume, 
+        price_momentum, price_change_pct, 'long'
+    )
+    short_standard, short_momentum, _, _, _, _ = check_entry_conditions(
+        data, current_price, current_volume, bid_volume, ask_volume, 
+        price_momentum, price_change_pct, 'short'
+    )
+    
+    # Add cooldown check to entry signals
+    long_standard = long_standard and can_trade
+    long_momentum = long_momentum and can_trade
+    short_standard = short_standard and can_trade
+    short_momentum = short_momentum and can_trade
+    
     # If no position is open, cancel all trigger orders
     if not has_position:
         try:
@@ -455,10 +478,6 @@ def trade_logic():
         if not check_recent_trades():
             logging.info("Skipping trade: In cooldown period after recent loss")
             return
-        
-        # Check entry conditions
-        long_standard, long_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'long')
-        short_standard, short_momentum = check_entry_conditions(data, current_price, current_volume, bid_volume, ask_volume, price_momentum, price_change_pct, 'short')
         
         # Additional safety checks
         if long_standard or long_momentum:
@@ -699,19 +718,29 @@ def trade_logic():
         f"Volume Change: {volume_change:.2f}%\n\n"
         
         f"Trading Signals:\n"
-        f"LONG Conditions:\n"
-        f"[*] MACD Momentum: {'YES' if macd_increasing else 'NO'} (needs 3 increasing bars)\n"
-        f"[*] Price Above EMA9: {current_price > ema9}\n"
-        f"[*] Volume Acceptable: {volume_ratio > 0.7}\n"
-        f"[*] Bullish Pressure: {bid_ask_ratio > 1}\n"
-        f"Final Long Signal: {long_entry}\n\n"
+        f"LONG Entry Conditions:\n"
+        f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
+        f"[*] MACD Momentum: {'✅' if macd_increasing else '❌'} (needs 3 increasing bars)\n"
+        f"   • Current diff: {macd_diffs[0]:.6f}\n"
+        f"   • Previous diff: {macd_diffs[1]:.6f}\n"
+        f"   • 2 bars ago: {macd_diffs[2]:.6f}\n"
+        f"[*] Price/EMA9 Threshold: {'✅' if (current_price/ema9 - 1) > 0.006 else '❌'} ({(current_price/ema9 - 1)*100:.2f}% vs 0.6%)\n"
+        f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
+        f"[*] Strong Bullish Pressure: {'✅' if bid_ask_ratio > 1.2 else '❌'} ({bid_ask_ratio:.2f})\n"
+        f"[*] Price Trend (3 bars): {'✅' if price_trend > 0.001 else '❌'} ({price_trend*100:.2f}% vs 0.1%)\n"
+        f"Final Long Signal: {'✅' if long_entry else '❌'}\n\n"
         
         f"SHORT Conditions:\n"
-        f"[*] MACD Momentum: {'YES' if macd_decreasing else 'NO'} (needs 3 decreasing bars)\n"
-        f"[*] Price Below EMA9: {current_price < ema9}\n"
-        f"[*] Volume Acceptable: {volume_ratio > 0.7}\n"
-        f"[*] Bearish Pressure: {bid_ask_ratio < 1}\n"
-        f"Final Short Signal: {short_entry}"
+        f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
+        f"[*] MACD Momentum: {'✅' if macd_decreasing else '❌'} (needs 3 decreasing bars)\n"
+        f"   • Current diff: {macd_diffs[0]:.6f}\n"
+        f"   • Previous diff: {macd_diffs[1]:.6f}\n"
+        f"   • 2 bars ago: {macd_diffs[2]:.6f}\n"
+        f"[*] Price/EMA9 Threshold: {'✅' if (ema9/current_price - 1) > 0.006 else '❌'} ({(ema9/current_price - 1)*100:.2f}% vs 0.6%)\n"
+        f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
+        f"[*] Strong Bearish Pressure: {'✅' if bid_ask_ratio < 0.8 else '❌'} ({bid_ask_ratio:.2f})\n"
+        f"[*] Price Trend (3 bars): {'✅' if price_trend < -0.001 else '❌'} ({price_trend*100:.2f}% vs -0.1%)\n"
+        f"Final Short Signal: {'✅' if short_entry else '❌'}"
     )
 
     # Add trading recommendation
