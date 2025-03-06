@@ -65,7 +65,7 @@ params = {
     'strong_volume_multiplier': 2.0,     # 2x average volume
     'cooldown_period': 15,      # minutes to wait after a loss
     'price_trend_bars': 3,      # number of bars to check price trend
-    'min_price_trend': 0.001,   # minimum price trend (0.1%)
+    'min_price_trend': 0.003,   # minimum price trend (0.3%)
     'require_price_alignment': True,  # price must align with MACD
 }
 
@@ -452,15 +452,15 @@ def trade_logic():
     ]
     
     # Check if MACD differences are increasing/decreasing
-    macd_increasing = all(macd_values[i] > macd_values[i+1] for i in range(2))
-    macd_decreasing = all(macd_values[i] < macd_values[i+1] for i in range(2))
+    macd_increasing = macd_values[0] > macd_values[1]  # Current higher than previous (2 bars check)
+    macd_decreasing = macd_values[0] < macd_values[1]  # Current lower than previous (2 bars check)
     
     # Determine MACD trend status
     if macd_increasing:
-        macd_trend = "Strong Bullish (MACD increasing for 3 bars)"
+        macd_trend = "Bullish (MACD increasing between last 2 bars)"
         macd_status = "BULLISH MOMENTUM"
     elif macd_decreasing:
-        macd_trend = "Strong Bearish (MACD decreasing for 3 bars)"
+        macd_trend = "Bearish (MACD decreasing between last 2 bars)"
         macd_status = "BEARISH MOMENTUM"
     elif macd > macd_signal:
         macd_trend = "MACD above signal but no momentum"
@@ -713,14 +713,13 @@ def trade_logic():
         f"LONG Entry Conditions:\n"
         f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
         f"[*] Not in Cooldown: {'✅' if can_trade else '❌'} ({params['cooldown_period']} min after loss)\n"
-        f"[*] MACD Momentum: {'✅' if macd_increasing else '❌'} (needs 3 increasing bars)\n"
+        f"[*] MACD Momentum: {'✅' if macd_increasing else '❌'} (current bar > previous bar)\n"
         f"   • Current diff: {macd_values[0]:.6f}\n"
         f"   • Previous diff: {macd_values[1]:.6f}\n"
-        f"   • 2 bars ago: {macd_values[2]:.6f}\n"
         f"[*] Price/EMA9 Threshold: {'✅' if (current_price/ema9 - 1) > params['ema_threshold'] else '❌'} ({(current_price/ema9 - 1)*100:.2f}% vs 0.6%)\n"
         f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
         f"[*] Strong Bullish Pressure: {'✅' if bid_ask_ratio > 1.2 else '❌'} ({bid_ask_ratio:.2f})\n"
-        f"[*] Price Trend (3 bars): {'✅' if price_trend > params['min_price_trend'] else '❌'} ({price_trend*100:.2f}% vs 0.1%)\n"
+        f"[*] Price Trend (3 bars): {'✅' if price_trend > params['min_price_trend'] else '❌'} ({price_trend*100:.2f}% vs 0.3%)\n"
         f"Long Standard Conditions: {'✅' if long_standard else '❌'}\n"
         f"Long Momentum Conditions: {'✅' if long_momentum else '❌'}\n"
         f"Final Long Signal: {'✅' if long_entry else '❌'}\n\n"
@@ -728,14 +727,13 @@ def trade_logic():
         f"SHORT Conditions:\n"
         f"[*] No Existing Position: {'✅' if not has_position else '❌'} ({position_info})\n"
         f"[*] Not in Cooldown: {'✅' if can_trade else '❌'} ({params['cooldown_period']} min after loss)\n"
-        f"[*] MACD Momentum: {'✅' if macd_decreasing else '❌'} (needs 3 decreasing bars)\n"
+        f"[*] MACD Momentum: {'✅' if macd_decreasing else '❌'} (current bar < previous bar)\n"
         f"   • Current diff: {macd_values[0]:.6f}\n"
         f"   • Previous diff: {macd_values[1]:.6f}\n"
-        f"   • 2 bars ago: {macd_values[2]:.6f}\n"
         f"[*] Price/EMA9 Threshold: {'✅' if (ema9/current_price - 1) > params['ema_threshold'] else '❌'} ({(ema9/current_price - 1)*100:.2f}% vs 0.6%)\n"
         f"[*] Volume Acceptable: {'✅' if volume_ratio > 0.7 else '❌'} ({volume_ratio:.2f}x)\n"
         f"[*] Strong Bearish Pressure: {'✅' if bid_ask_ratio < 0.8 else '❌'} ({bid_ask_ratio:.2f})\n"
-        f"[*] Price Trend (3 bars): {'✅' if price_trend < -params['min_price_trend'] else '❌'} ({price_trend*100:.2f}% vs -0.1%)\n"
+        f"[*] Price Trend (3 bars): {'✅' if price_trend < -params['min_price_trend'] else '❌'} ({price_trend*100:.2f}% vs -0.3%)\n"
         f"Short Standard Conditions: {'✅' if short_standard else '❌'}\n"
         f"Short Momentum Conditions: {'✅' if short_momentum else '❌'}\n"
         f"Final Short Signal: {'✅' if short_entry else '❌'}\n"
