@@ -63,7 +63,7 @@ params = {
     'short_underwater_threshold': -0.02,
     'strong_momentum_threshold': 0.015,  # 1.5% price move
     'strong_volume_multiplier': 2.0,     # 2x average volume
-    'cooldown_period': 15,      # minutes to wait after a loss
+    'cooldown_period': 30,      # minutes to wait after a loss
     'price_trend_bars': 3,      # number of bars to check price trend
     'min_price_trend': 0.003,   # minimum price trend (0.3%)
     'require_price_alignment': True,  # price must align with MACD
