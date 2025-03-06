@@ -730,15 +730,14 @@ def trade_logic():
         f"[*] Price Trend (3 bars): {'✅' if price_trend < -params['min_price_trend'] else '❌'} ({price_trend*100:.2f}% vs -0.3%)\n"
         f"Short Standard Conditions: {'✅' if short_standard else '❌'}\n"
         f"Short Momentum Conditions: {'✅' if short_momentum else '❌'}\n"
-        f"Final Short Signal: {'✅' if short_entry else '❌'}\n"
-
+        f"Final Short Signal: {'✅' if short_entry else '❌'}\n\n"
 
         f"Position Status:\n"
         f"Current: {position_info}\n"
         f"Entry Price: {position_entry}\n"
         f"Unrealized PnL: {position_pnl}\n\n"
 
-                f"Market Analysis:\n"
+        f"Market Analysis:\n"
         f"Current Price: ${current_price:.2f}\n"
         f"Current Volume: {current_volume:.2f}\n"
         f"Volume vs Avg: {volume_ratio:.2f}x\n"
