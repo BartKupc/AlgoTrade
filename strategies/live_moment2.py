@@ -404,6 +404,78 @@ def check_price_trend(data, current_price, direction='long'):
     else:
         return price_change < -params['min_price_trend']
 
+def check_and_emergency_close_if_needed():
+    """Check if price is beyond stop loss level and close position if needed"""
+    try:
+        # Check if we have a position
+        position = bitget.fetch_open_positions(params['symbol'])
+        if not position:
+            return  # No position to check
+            
+        # Get position details
+        pos = position[0]
+        position_side = pos['side']
+        position_size = pos['contracts']
+        position_entry = float(pos['entryPrice'])
+        
+        # Get current price
+        ticker = bitget.fetch_ticker(params['symbol'])
+        current_price = ticker['last']
+        
+        # Calculate what the stop loss should be
+        if position_side == 'long':
+            expected_sl = position_entry * (1 - params['stop_loss_pct'] * 1.02)
+            # For long: If price is BELOW stop loss, it should have triggered
+            if current_price < expected_sl:
+                logging.error(f"🚨 EMERGENCY: Price ${current_price} is below stop loss ${expected_sl} for LONG position!")
+                logging.error(f"Executing emergency flash close...")
+                
+                # Execute flash close
+                result = bitget.flash_close_position(params['symbol'], side=position_side)
+                
+                # Log the emergency action
+                logging.info(f"✅ EMERGENCY POSITION CLOSE EXECUTED: {result}")
+                send_telegram_message(
+                    f"🚨 EMERGENCY POSITION CLOSE 🚨\n"
+                    f"Stop loss failed to trigger!\n"
+                    f"Position: {position_side.upper()} {position_size} @ ${position_entry}\n"
+                    f"Expected SL: ${expected_sl}\n"
+                    f"Current price: ${current_price}\n"
+                    f"Position manually closed by safety system."
+                )
+                
+                # Log the trade
+                log_trade("EMERGENCY_EXIT", position_side, position_entry, current_price, 
+                          position_size, (current_price - position_entry) * position_size, None)
+                
+        else:  # short position
+            expected_sl = position_entry * (1 + params['stop_loss_pct'] * 1.02)
+            # For short: If price is ABOVE stop loss, it should have triggered
+            if current_price > expected_sl:
+                logging.error(f"🚨 EMERGENCY: Price ${current_price} is above stop loss ${expected_sl} for SHORT position!")
+                logging.error(f"Executing emergency flash close...")
+                
+                # Execute flash close
+                result = bitget.flash_close_position(params['symbol'], side=position_side)
+                
+                # Log the emergency action
+                logging.info(f"✅ EMERGENCY POSITION CLOSE EXECUTED: {result}")
+                send_telegram_message(
+                    f"🚨 EMERGENCY POSITION CLOSE 🚨\n"
+                    f"Stop loss failed to trigger!\n"
+                    f"Position: {position_side.upper()} {position_size} @ ${position_entry}\n"
+                    f"Expected SL: ${expected_sl}\n"
+                    f"Current price: ${current_price}\n"
+                    f"Position manually closed by safety system."
+                )
+                
+                # Log the trade
+                log_trade("EMERGENCY_EXIT", position_side, position_entry, current_price, 
+                          position_size, (position_entry - current_price) * position_size, None)
+                
+    except Exception as e:
+        logging.error(f"Error in emergency close check: {str(e)}")
+
 def trade_logic():
     # Initialize entry variables at the start
     long_entry = False
@@ -426,29 +498,8 @@ def trade_logic():
     position = bitget.fetch_open_positions(params['symbol'])
     has_position = len(position) > 0
     
-    # Check cooldown period
-    can_trade = check_recent_trades()
-    logging.info(f"Can trade status: {can_trade}")
-    
-    # Check entry conditions
-    long_standard, long_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
-        data, current_price, current_volume, bid_volume, ask_volume, 
-        price_momentum, price_change_pct, 'long'
-    )
-    short_standard, short_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
-        data, current_price, current_volume, bid_volume, ask_volume, 
-        price_momentum, price_change_pct, 'short'
-    )
-    
-    # Apply can_trade check
-    long_standard = long_standard and can_trade
-    long_momentum = long_momentum and can_trade
-    short_standard = short_standard and can_trade
-    short_momentum = short_momentum and can_trade
-    
-    # Determine final entry signals
-    long_entry = long_standard or long_momentum
-    short_entry = short_standard or short_momentum
+    # SAFETY CHECK: Emergency close if stop loss failed
+    check_and_emergency_close_if_needed()
     
     # If no position is open, cancel all trigger orders
     if not has_position:
@@ -525,6 +576,30 @@ def trade_logic():
                 logging.info(f"Position has {len(trigger_orders)} protection orders in place")
         except Exception as e:
             logging.error(f"Error checking trigger orders for position: {str(e)}")
+    
+    # Check cooldown period
+    can_trade = check_recent_trades()
+    logging.info(f"Can trade status: {can_trade}")
+    
+    # Check entry conditions
+    long_standard, long_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
+        data, current_price, current_volume, bid_volume, ask_volume, 
+        price_momentum, price_change_pct, 'long'
+    )
+    short_standard, short_momentum, price_trend, macd_values, macd_increasing, macd_decreasing = check_entry_conditions(
+        data, current_price, current_volume, bid_volume, ask_volume, 
+        price_momentum, price_change_pct, 'short'
+    )
+    
+    # Apply can_trade check
+    long_standard = long_standard and can_trade
+    long_momentum = long_momentum and can_trade
+    short_standard = short_standard and can_trade
+    short_momentum = short_momentum and can_trade
+    
+    # Determine final entry signals
+    long_entry = long_standard or long_momentum
+    short_entry = short_standard or short_momentum
     
     # Log current market state with trading implications
     logging.info(f"Current Price: ${current_price:.2f}")
