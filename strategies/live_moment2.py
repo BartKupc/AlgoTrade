@@ -695,13 +695,7 @@ def trade_logic():
     
     # Create status message with initialized variables
     message = (
-        
-        f"Market Analysis:\n"
-        f"Current Price: ${current_price:.2f}\n"
-        f"Current Volume: {current_volume:.2f}\n"
-        f"Volume vs Avg: {volume_ratio:.2f}x\n"
-        f"Bid/Ask Ratio: {bid_ask_ratio:.2f} ({('Bullish' if bid_ask_ratio > 1 else 'Bearish')} pressure)\n\n"
-        
+        f"=== Momentum Bot Status Update ===\n\n"     
         f"Technical Indicators:\n"
         f"MACD: {macd:.6f} vs Signal: {macd_signal:.6f}\n"
         f"MACD Status: {macd_status}\n"
@@ -738,11 +732,17 @@ def trade_logic():
         f"Short Momentum Conditions: {'✅' if short_momentum else '❌'}\n"
         f"Final Short Signal: {'✅' if short_entry else '❌'}\n"
 
-        f"=== Momentum Bot Status Update ===\n\n"
+
         f"Position Status:\n"
         f"Current: {position_info}\n"
         f"Entry Price: {position_entry}\n"
         f"Unrealized PnL: {position_pnl}\n\n"
+
+                f"Market Analysis:\n"
+        f"Current Price: ${current_price:.2f}\n"
+        f"Current Volume: {current_volume:.2f}\n"
+        f"Volume vs Avg: {volume_ratio:.2f}x\n"
+        f"Bid/Ask Ratio: {bid_ask_ratio:.2f} ({('Bullish' if bid_ask_ratio > 1 else 'Bearish')} pressure)\n\n"
     )
 
     # Add pending orders if any
