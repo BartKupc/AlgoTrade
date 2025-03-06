@@ -351,3 +351,18 @@ class BitgetFutures():
             base, quote = symbol.split(':')[0].split('/')
             return f"{base}{quote}_UMCBL"
         return symbol
+
+    def fetch_my_trades(self, symbol: str, since: Optional[int] = None, limit: int = 100) -> List[Dict]:
+        """Fetch completed trades with PnL information"""
+        try:
+            params = {
+                'productType': 'USDT-FUTURES',
+                'marginCoin': 'USDT'
+            }
+            if since:
+                params['startTime'] = since
+            
+            return self.session.fetch_my_trades(symbol, limit=limit, params=params)
+        except Exception as e:
+            logging.error(f"Error fetching trade history: {str(e)}")
+            return []

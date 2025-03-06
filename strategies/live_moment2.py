@@ -318,34 +318,81 @@ def log_trade(action, side, entry_price, exit_price=None, contracts=None, pnl=No
     trade_logger.info(trade_details)
 
 def check_recent_trades():
-    """Check recent trade history for losses"""
+    """Check recent trade history for losses with minimal logging"""
     try:
-        # Use fetch_positions to get recent position history
-        positions = bitget.fetch_positions([params['symbol']])
-        if not positions:
+        # Fetch recent trades from Bitget
+        trades = bitget.fetch_my_trades(params['symbol'], limit=20)  # Get 20 most recent trades
+        
+        if not trades:
+            logging.info("No recent trades found - Can trade: YES")
             return True
         
-        # Get the most recent closed position
-        closed_positions = [pos for pos in positions if float(pos['info'].get('holdSide', 0)) == 0]
-        if not closed_positions:
-            return True
+        # Log how many trades we found
+        logging.info(f"Found {len(trades)} recent trades for analysis")
         
-        # Check last position
-        last_position = closed_positions[-1]
-        last_position_time = datetime.fromtimestamp(float(last_position['timestamp']) / 1000)
-        time_since_last_position = (datetime.now() - last_position_time).total_seconds() / 60
+        # Sort trades by timestamp descending (newest first)
+        trades.sort(key=lambda x: x['timestamp'], reverse=True)
         
-        # If last position was a loss and within cooldown period, don't trade
-        unrealized_pnl = float(last_position['info'].get('unrealisedPnl', 0))
-        if unrealized_pnl < 0 and time_since_last_position < params['cooldown_period']:
-            logging.info(f"In cooldown period after loss. {params['cooldown_period'] - time_since_last_position:.1f} minutes remaining")
-            return False
+        # Print details of recent trades to help debug
+        logging.info("----- Recent Trade Details -----")
+        for idx, trade in enumerate(trades[:5]):  # Show first 5 trades
+            trade_time = datetime.fromtimestamp(trade['timestamp'] / 1000)
+            time_ago = (datetime.now() - trade_time).total_seconds() / 60
             
-        return True
+            profit_value = None
+            if 'info' in trade and 'profit' in trade['info']:
+                profit_value = float(trade['info']['profit'])
+            
+            logging.info(f"Trade #{idx+1} - {trade['side'].upper()} {trade['amount']} @ ${trade['price']:.2f} - {time_ago:.1f} min ago - Profit: {profit_value}")
+        
+        # Filter to find trades with actual PnL (profit not equal to 0)
+        closing_trades = []
+        for trade in trades:
+            has_non_zero_pnl = False
+            pnl_value = 0
+            
+            # Check info.profit (this is where Bitget seems to store realized PnL)
+            if 'info' in trade and 'profit' in trade['info']:
+                pnl_value = float(trade['info']['profit'])
+                if pnl_value != 0:
+                    has_non_zero_pnl = True
+            
+            if has_non_zero_pnl:
+                closing_trades.append((trade, pnl_value))
+                trade_time = datetime.fromtimestamp(trade['timestamp'] / 1000)
+                time_ago = (datetime.now() - trade_time).total_seconds() / 60
+                logging.info(f"Found trade with PnL: {trade['side'].upper()} {trade['amount']} @ ${trade['price']:.2f} - {time_ago:.1f} min ago - PnL: {pnl_value}")
+        
+        # If no trades with PnL found, we can trade
+        if not closing_trades:
+            logging.info("No trades with PnL found in recent history - Can trade: YES")
+            return True
+            
+        # Find the most recent trade with a LOSS (negative PnL)
+        losing_trades = [(t, pnl) for t, pnl in closing_trades if pnl < 0]
+        if not losing_trades:
+            logging.info("No losing trades found in recent history - Can trade: YES") 
+            return True
+            
+        # Get the most recent losing trade
+        last_losing_trade, pnl = losing_trades[0]
+        trade_time = datetime.fromtimestamp(last_losing_trade['timestamp'] / 1000)
+        time_since_trade = (datetime.now() - trade_time).total_seconds() / 60
+        
+        logging.info(f"Last LOSING Trade: {last_losing_trade['side'].upper()} {last_losing_trade['amount']} @ ${last_losing_trade['price']:.2f} ({time_since_trade:.1f} min ago)")
+        logging.info(f"Realized Loss: {pnl}")
+        
+        # Make cooldown decision 
+        if time_since_trade < params['cooldown_period']:
+            logging.info(f"COOLDOWN ACTIVE - {params['cooldown_period'] - time_since_trade:.1f} minutes remaining - Can trade: NO")
+            return False
+        else:
+            logging.info(f"Loss occurred but outside cooldown period ({time_since_trade:.1f} min > {params['cooldown_period']} min) - Can trade: YES")
+            return True
+            
     except Exception as e:
         logging.error(f"Error checking recent trades: {str(e)}")
-        # Return True in case of error to allow trading to continue
-        return True
+        return False
 
 def check_price_trend(data, current_price, direction='long'):
     """Check if price trend aligns with intended direction"""
