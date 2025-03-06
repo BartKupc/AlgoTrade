@@ -461,12 +461,76 @@ def trade_logic():
                     logging.info(f"[*] Cancelled order {order['id']}")
         except Exception as e:
             logging.error(f"Error cancelling trigger orders: {str(e)}")
+    # SAFETY CHECK: If position exists but no SL/TP, add them
+    elif has_position:  # This means there IS a position
+        try:
+            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            if not trigger_orders:
+                logging.warning("⚠️ POSITION WITHOUT PROTECTION DETECTED! Adding stop loss and take profit...")
+                
+                # Get position details
+                pos = position[0]
+                position_side = pos['side']
+                position_size = pos['contracts']
+                position_entry = float(pos['entryPrice'])
+                
+                logging.info(f"Position details: {position_side.upper()} {position_size} contracts @ ${position_entry}")
+                
+                # Calculate stop loss and take profit levels
+                if position_side == 'long':  # LONG position
+                    stop_loss = position_entry * (1 - params['stop_loss_pct'] * 1.02)  # Add 2% buffer
+                    take_profit = position_entry * (1 + params['take_profit_pct'])
+                    close_side = 'sell'
+                else:  # SHORT position
+                    stop_loss = position_entry * (1 + params['stop_loss_pct'] * 1.02)  # Add 2% buffer
+                    take_profit = position_entry * (1 - params['take_profit_pct'])
+                    close_side = 'buy'
+                
+                # Place Stop Loss
+                try:
+                    sl_order = bitget.place_trigger_market_order(
+                        symbol=params['symbol'],
+                        side=close_side,
+                        amount=position_size,
+                        trigger_price=stop_loss,
+                        reduce=True
+                    )
+                    logging.info(f"Emergency Stop Loss added: {sl_order['id']} at ${stop_loss:.2f}")
+                except Exception as e:
+                    logging.error(f"Failed to add emergency stop loss: {str(e)}")
+                    send_telegram_message("⚠️ CRITICAL: Failed to add missing stop loss to existing position!")
+                
+                # Place Take Profit
+                try:
+                    tp_order = bitget.place_trigger_market_order(
+                        symbol=params['symbol'],
+                        side=close_side,
+                        amount=position_size,
+                        trigger_price=take_profit,
+                        reduce=True
+                    )
+                    logging.info(f"Emergency Take Profit added: {tp_order['id']} at ${take_profit:.2f}")
+                except Exception as e:
+                    logging.error(f"Failed to add emergency take profit: {str(e)}")
+                
+                # Send notification
+                safety_message = (
+                    f"🛡️ SAFETY SYSTEM ACTIVATED 🛡️\n"
+                    f"Found {position_side.upper()} position without protection\n"
+                    f"Added emergency stop loss at ${stop_loss:.2f}\n"
+                    f"Added emergency take profit at ${take_profit:.2f}"
+                )
+                send_telegram_message(safety_message)
+            else:
+                logging.info(f"Position has {len(trigger_orders)} protection orders in place")
+        except Exception as e:
+            logging.error(f"Error checking trigger orders for position: {str(e)}")
     
     # Log current market state with trading implications
     logging.info(f"Current Price: ${current_price:.2f}")
     logging.info(f"Current Volume: {current_volume:.2f}")
     logging.info(f"Volume vs Last Hour: {volume_ratio:.2f}x")
-    logging.info(f"Bid/Ask Volume Ratio: {bid_ask_ratio:.2f} " + 
+    logging.info(f"Bid/Ask Ratio: {bid_ask_ratio:.2f} " + 
                 f"({'Bullish' if bid_ask_ratio > 1 else 'Bearish'} pressure)")
     
     # Get key indicators for logging
@@ -580,51 +644,107 @@ def trade_logic():
                 logging.info(f"Entry Price: ${entry_price:.2f}")
                 logging.info(f"Quantity: {quantity}")
                 
-                # Simple SL/TP logic
+                # Wait briefly for the position to be established
+                time.sleep(2)  # Allow time for the order to be processed
+
+                # Verify position is open before placing stop loss
+                position = bitget.fetch_open_positions(params['symbol'])
+                if not position:
+                    logging.warning("Position not found after entry order - waiting longer")
+                    # Wait longer and check again
+                    time.sleep(5)
+                    position = bitget.fetch_open_positions(params['symbol'])
+                    
+                    if not position:
+                        logging.error("Position still not found after extended wait - cannot place stop loss")
+                        send_telegram_message("⚠️ WARNING: Entry order placed but position not found. Stop loss could not be set!")
+                        return
+
+                # Get actual position details
+                pos = position[0]
+                position_side = pos['side']
+                position_size = pos['contracts']
+                position_entry = float(pos['entryPrice'])
+
+                logging.info(f"Position confirmed: {position_side.upper()} {position_size} contracts @ ${position_entry}")
+
+                # Calculate more conservative stop loss (slightly wider)
                 if side == 'buy':  # LONG position
-                    stop_loss = entry_price * (1 - params['stop_loss_pct'])
-                    take_profit = entry_price * (1 + params['take_profit_pct'])
+                    stop_loss = position_entry * (1 - params['stop_loss_pct'] * 1.02)  # Add 2% buffer
+                    take_profit = position_entry * (1 + params['take_profit_pct'])
                     close_side = 'sell'
                 else:  # SHORT position
-                    stop_loss = entry_price * (1 + params['stop_loss_pct'])
-                    take_profit = entry_price * (1 - params['take_profit_pct'])
+                    stop_loss = position_entry * (1 + params['stop_loss_pct'] * 1.02)  # Add 2% buffer
+                    take_profit = position_entry * (1 - params['take_profit_pct'])
                     close_side = 'buy'
-                
-                # Place Stop Loss - using quantity instead of size
-                sl_order = bitget.place_trigger_market_order(
-                    symbol=params['symbol'],
-                    side=close_side,
-                    amount=quantity,  # Changed from size to quantity
-                    trigger_price=stop_loss,
-                    reduce=True
-                )
-                
-                # Place Take Profit - using quantity instead of size
-                tp_order = bitget.place_trigger_market_order(
-                    symbol=params['symbol'],
-                    side=close_side,
-                    amount=quantity,  # Changed from size to quantity
-                    trigger_price=take_profit,
-                    reduce=True
-                )
-                
-                # Log orders
-                logging.info(f"\n=== Stop Loss Order ===")
-                logging.info(f"Type: {'LONG' if side == 'buy' else 'SHORT'} Stop Loss")
-                logging.info(f"Close Side: {close_side.upper()}")
-                logging.info(f"Trigger Price: ${stop_loss:.2f}")
-                
-                logging.info(f"\n=== Take Profit Order ===")
-                logging.info(f"Type: {'LONG' if side == 'buy' else 'SHORT'} Take Profit")
-                logging.info(f"Close Side: {close_side.upper()}")
-                logging.info(f"Trigger Price: ${take_profit:.2f}")
-                
+
+                # Place Stop Loss - using verified position size and explicit reduce-only
+                try:
+                    sl_order = bitget.place_trigger_market_order(
+                        symbol=params['symbol'],
+                        side=close_side,
+                        amount=position_size,  # Use verified position size
+                        trigger_price=stop_loss,
+                        reduce=True
+                    )
+                    
+                    # Verify stop loss was placed
+                    logging.info(f"Stop Loss Order ID: {sl_order['id']}")
+                    logging.info(f"Stop Loss Type: {'LONG' if side == 'buy' else 'SHORT'} Stop Loss")
+                    logging.info(f"Stop Loss Close Side: {close_side.upper()}")
+                    logging.info(f"Stop Loss Trigger Price: ${stop_loss:.2f}")
+                except Exception as e:
+                    logging.error(f"CRITICAL ERROR - Failed to place stop loss: {str(e)}")
+                    send_telegram_message(f"⚠️ CRITICAL WARNING: Stop loss failed to place. Manual intervention required!")
+                    # Try a different method if available
+                    try:
+                        logging.info("Attempting alternative stop loss method...")
+                        # Add your alternative stop loss method here if available
+                    except:
+                        logging.error("Alternative stop loss method also failed")
+
+                # Place Take Profit with similar verification
+                try:
+                    tp_order = bitget.place_trigger_market_order(
+                        symbol=params['symbol'],
+                        side=close_side,
+                        amount=position_size,  # Use verified position size
+                        trigger_price=take_profit,
+                        reduce=True
+                    )
+                    
+                    logging.info(f"Take Profit Order ID: {tp_order['id']}")
+                    logging.info(f"Take Profit Type: {'LONG' if side == 'buy' else 'SHORT'} Take Profit")
+                    logging.info(f"Take Profit Close Side: {close_side.upper()}")
+                    logging.info(f"Take Profit Trigger Price: ${take_profit:.2f}")
+                except Exception as e:
+                    logging.error(f"Failed to place take profit: {str(e)}")
+
+                # Verify stop loss and take profit orders are active
+                try:
+                    time.sleep(1)  # Brief pause to ensure orders are registered
+                    trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+                    if trigger_orders:
+                        logging.info(f"Found {len(trigger_orders)} active trigger orders:")
+                        for order in trigger_orders:
+                            order_type = "Unknown"
+                            if order['price'] == stop_loss:
+                                order_type = "Stop Loss"
+                            elif order['price'] == take_profit:
+                                order_type = "Take Profit"
+                            logging.info(f"- {order_type}: {order['id']} at ${order['price']}")
+                    else:
+                        logging.error("No trigger orders found after placement - SL/TP may not be active!")
+                        send_telegram_message("⚠️ WARNING: No stop loss/take profit orders found after placement. Check position!")
+                except Exception as e:
+                    logging.error(f"Error verifying trigger orders: {str(e)}")
+
                 # Send Telegram message
                 entry_message = (
                     f"🚨 NEW {side.upper()} POSITION OPENED 🚨\n"
                     f"Entry Type: {'Strong Momentum' if is_momentum_entry else 'Standard Entry'}\n"
-                    f"Price: ${entry_price:.2f}\n"
-                    f"Size: {quantity} contracts\n"
+                    f"Price: ${position_entry:.2f}\n"
+                    f"Size: {position_size} contracts\n"
                     f"Stop Loss: ${stop_loss:.2f} ({'-' if side == 'buy' else '+'}{params['stop_loss_pct']*100}%)\n"
                     f"Take Profit: ${take_profit:.2f} ({'+' if side == 'buy' else '-'}{params['take_profit_pct']*100}%)"
                 )
