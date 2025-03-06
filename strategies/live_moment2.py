@@ -516,8 +516,8 @@ def trade_logic():
     elif has_position:  # This means there IS a position
         try:
             trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
-            if not trigger_orders:
-                logging.warning("⚠️ POSITION WITHOUT PROTECTION DETECTED! Adding stop loss and take profit...")
+            if len(trigger_orders) == 0:  # Explicitly check if list is empty
+                logging.warning("⚠️ POSITION WITHOUT PROTECTION DETECTED!")
                 
                 # Get position details
                 pos = position[0]
@@ -526,50 +526,13 @@ def trade_logic():
                 position_entry = float(pos['entryPrice'])
                 
                 logging.info(f"Position details: {position_side.upper()} {position_size} contracts @ ${position_entry}")
-                
-                # Calculate stop loss and take profit levels
-                if position_side == 'long':  # LONG position
-                    stop_loss = position_entry * (1 - params['stop_loss_pct'] * 1.02)  # Add 2% buffer
-                    take_profit = position_entry * (1 + params['take_profit_pct'])
-                    close_side = 'sell'
-                else:  # SHORT position
-                    stop_loss = position_entry * (1 + params['stop_loss_pct'] * 1.02)  # Add 2% buffer
-                    take_profit = position_entry * (1 - params['take_profit_pct'])
-                    close_side = 'buy'
-                
-                # Place Stop Loss
-                try:
-                    sl_order = bitget.place_trigger_market_order(
-                        symbol=params['symbol'],
-                        side=close_side,
-                        amount=position_size,
-                        trigger_price=stop_loss,
-                        reduce=True
-                    )
-                    logging.info(f"Emergency Stop Loss added: {sl_order['id']} at ${stop_loss:.2f}")
-                except Exception as e:
-                    logging.error(f"Failed to add emergency stop loss: {str(e)}")
-                    send_telegram_message("⚠️ CRITICAL: Failed to add missing stop loss to existing position!")
-                
-                # Place Take Profit
-                try:
-                    tp_order = bitget.place_trigger_market_order(
-                        symbol=params['symbol'],
-                        side=close_side,
-                        amount=position_size,
-                        trigger_price=take_profit,
-                        reduce=True
-                    )
-                    logging.info(f"Emergency Take Profit added: {tp_order['id']} at ${take_profit:.2f}")
-                except Exception as e:
-                    logging.error(f"Failed to add emergency take profit: {str(e)}")
+                logging.info("Protection will be added in position management section")
                 
                 # Send notification
                 safety_message = (
-                    f"🛡️ SAFETY SYSTEM ACTIVATED 🛡️\n"
-                    f"Found {position_side.upper()} position without protection\n"
-                    f"Added emergency stop loss at ${stop_loss:.2f}\n"
-                    f"Added emergency take profit at ${take_profit:.2f}"
+                    f"⚠️ WARNING: {position_side.upper()} position without protection detected\n"
+                    f"Position: {position_size} contracts @ ${position_entry}\n"
+                    f"Protection will be added in position management section"
                 )
                 send_telegram_message(safety_message)
             else:
