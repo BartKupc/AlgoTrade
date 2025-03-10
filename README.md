@@ -91,10 +91,6 @@ Always perform thorough testing in paper trading mode or with minimal capital be
 
 Monitor trades regularly and maintain backups of your configuration and logs.
 
-##Contributing
-
-Contributions are welcome! Please submit pull requests or report issues to help enhance the bot's functionality and reliability.
-
 
 ## Disclaimer
 
