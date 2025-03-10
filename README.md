@@ -5,48 +5,48 @@ This repository contains a Python-based algorithmic trading bot designed for cry
 
 ## Features
 
-Automated cryptocurrency trading with momentum-based strategies
+- Automated cryptocurrency trading with momentum-based strategies
 
-Supports long and short positions with configurable parameters
+- Supports long and short positions with configurable parameters
 
-Incorporates MACD, EMA, volume analysis, and price momentum indicators
+- Incorporates MACD, EMA, volume analysis, and price momentum indicators
 
-Implements protective measures like stop loss and take profit
+- Implements protective measures like stop loss and take profit
 
-Telegram integration for real-time alerts and trade notifications
+- Telegram integration for real-time alerts and trade notifications
 
-Comprehensive logging for trades and market analysis
+- Comprehensive logging for trades and market analysis
 
 
 ## Prerequisites
 
-Python 3.8 or later
+- Python 3.8 or later
 
-ta library for technical analysis
+- ta library for technical analysis
 
-Access to Bitget Futures account with API keys
+- Access to Bitget Futures account with API keys
 
-Telegram bot for notifications
+- Telegram bot for notifications
 
 
 ## Installation
 
 Clone the repository:
-
+```
 git clone https://github.com/BartKupc/AlgoTrade.git
 cd AlgoTrade
-
+```
 Install dependencies:
-
+```
 pip install -r requirements.txt
-
+```
 
 ## Configure your API keys:
 
 Create a file named config.json in the /config directory.
 
 Structure your config.json as follows:
-
+```
 {
   "bitget": {
     "api_key": "your-api-key",
@@ -54,7 +54,7 @@ Structure your config.json as follows:
     "passphrase": "your-api-passphrase"
   }
 }
-
+```
 
 ## Configure Telegram notifications:
 
@@ -64,8 +64,9 @@ Update the TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the script with your Teleg
 ## Running the Bot
 
 To start the bot, execute:
-
+```
 python live_moment2.py
+``` 
 
 
 ## Customizing the Bot
