@@ -1,8 +1,9 @@
-#AlgoTrade - Cryptocurrency Algorithmic Trading Bot
+# AlgoTrade - Cryptocurrency Algorithmic Trading Bot
 
 This repository contains a Python-based algorithmic trading bot designed for cryptocurrency markets, utilizing technical analysis indicators such as MACD, EMA, and real-time volume analysis to make informed trading decisions. The bot is integrated with Bitget Futures exchange and supports real-time trade notifications via Telegram.
 
-##Features
+
+## Features
 
 Automated cryptocurrency trading with momentum-based strategies
 
@@ -16,7 +17,8 @@ Telegram integration for real-time alerts and trade notifications
 
 Comprehensive logging for trades and market analysis
 
-##Prerequisites
+
+## Prerequisites
 
 Python 3.8 or later
 
@@ -26,7 +28,8 @@ Access to Bitget Futures account with API keys
 
 Telegram bot for notifications
 
-##Installation
+
+## Installation
 
 Clone the repository:
 
@@ -37,7 +40,8 @@ Install dependencies:
 
 pip install -r requirements.txt
 
-##Configure your API keys:
+
+## Configure your API keys:
 
 Create a file named config.json in the /config directory.
 
@@ -51,17 +55,20 @@ Structure your config.json as follows:
   }
 }
 
-##Configure Telegram notifications:
+
+## Configure Telegram notifications:
 
 Update the TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the script with your Telegram bot credentials.
 
-##Running the Bot
+
+## Running the Bot
 
 To start the bot, execute:
 
 python live_moment2.py
 
-##Customizing the Bot
+
+## Customizing the Bot
 
 You can adjust trading parameters by modifying the params dictionary in live_moment2.py:
 
@@ -71,11 +78,13 @@ timeframe: Data interval (e.g., 1h, 15m)
 
 Leverage, EMA period, thresholds, stop loss, and take profit percentages
 
-##Monitoring and Logs
+
+## Monitoring and Logs
 
 Trade logs and market analysis are stored in the /trade_logs directory. You can monitor real-time bot activity and historical performance.
 
-##Safety and Risk Management
+
+## Safety and Risk Management
 
 Always perform thorough testing in paper trading mode or with minimal capital before deploying significant funds.
 
@@ -85,6 +94,7 @@ Monitor trades regularly and maintain backups of your configuration and logs.
 
 Contributions are welcome! Please submit pull requests or report issues to help enhance the bot's functionality and reliability.
 
-##Disclaimer
+
+## Disclaimer
 
 This bot is for educational purposes only. Trading cryptocurrencies involves significant risk. The authors are not responsible for any financial losses incurred.
